@@ -8,6 +8,8 @@ import { searchPage } from "./ui/searchpage.js";
 import { streamSearch, mangaDetail } from "./ui/searchstream.js";
 import { seriesPage } from "./ui/series.js";
 import { queuePage } from "./ui/queue.js";
+import { browseIndex, browseSource, streamBrowse } from "./ui/browse.js";
+import { extensionsPage, setExtension } from "./ui/extensions.js";
 import { scanWanted } from "./fetch.js";
 import { startScheduler, state as schedState, checkStalled } from "./schedule.js";
 
@@ -148,6 +150,24 @@ export async function serve(): Promise<void> {
       }
       if (path === "/review") return html(reviewPage());
       if (path === "/queue") return html(queuePage());
+      if (path === "/browse") return html(browseIndex());
+      if (path === "/extensions") {
+        return html(extensionsPage({
+          ...(url.searchParams.get("q") ? { q: url.searchParams.get("q")! } : {}),
+          ...(url.searchParams.get("nsfw") === "0" ? { nsfw: false } : {}),
+          ...(url.searchParams.get("installed") ? { installed: true } : {}),
+        }));
+      }
+      if (path === "/api/browse") {
+        streamBrowse(res, url.searchParams.get("source") ?? "",
+          url.searchParams.get("type") ?? "POPULAR", url.searchParams.getAll("f")).catch(() => res.end());
+        return;
+      }
+      const b = /^\/browse\/(.+)$/.exec(path);
+      if (b) {
+        return html(browseSource(decodeURIComponent(b[1]!),
+          url.searchParams.get("type") ?? "POPULAR", url.searchParams.getAll("f")));
+      }
       const m = /^\/series\/(\d+)$/.exec(path);
       if (m) return html(seriesPage(Number(m[1])));
     }
@@ -170,6 +190,10 @@ export async function serve(): Promise<void> {
         }
         const scan = /^\/series\/(\d+)\/scan$/.exec(path);
         if (scan) { await scanWanted({ seriesId: Number(scan[1]) }); return `/series/${scan[1]}`; }
+        if (path === "/extensions/install" || path === "/extensions/uninstall") {
+          await setExtension(form.get("pkg") ?? "", path.endsWith("install"));
+          return "/extensions";
+        }
         const mute = /^\/series\/(\d+)\/mute$/.exec(path);
         if (mute) {
           await db().query("UPDATE series SET muted = NOT muted WHERE id = $1", [Number(mute[1])]);

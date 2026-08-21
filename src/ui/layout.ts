@@ -36,7 +36,7 @@ a.series{color:#cde;text-decoration:none}a.series:hover{text-decoration:underlin
 .tile .n{font-size:12px;color:#888}
 `;
 
-export type Nav = "library" | "search" | "review" | "queue";
+export type Nav = "library" | "browse" | "search" | "review" | "queue" | "extensions";
 
 export function page(active: Nav, subtitle: string, body: string): string {
   const link = (id: Nav, href: string, label: string): string =>
@@ -45,9 +45,11 @@ export function page(active: Nav, subtitle: string, body: string): string {
 <meta name="viewport" content="width=device-width,initial-scale=1"><style>${CSS}</style></head><body>
 <header><h1>Kupoyomi</h1><nav>
   ${link("library", "/", "Library")}
-  ${link("search", "/search", "Search &amp; add")}
+  ${link("browse", "/browse", "Browse")}
+  ${link("search", "/search", "Search")}
   ${link("review", "/review", "Migrations")}
   ${link("queue", "/queue", "Queue")}
+  ${link("extensions", "/extensions", "Sources")}
 </nav><span class="sub">${subtitle}</span></header>
 <main>${body}</main></body></html>`;
 }

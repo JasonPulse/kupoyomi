@@ -11,6 +11,8 @@ type Row = {
 
 const EXTRA = `
 .lib{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px}
+.news .lc{box-shadow:0 1px 4px rgba(0,0,0,.35);border-color:#3a3a44}
+.news .lc .t{color:#dde}
 .lc{position:relative;border-radius:5px;overflow:hidden;background:#191919;border:1px solid #2c2c2c;
   text-decoration:none;display:block}
 .lc img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#242424}
@@ -57,7 +59,8 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
   };
   const pct = (r: Row): number => (r.held + r.wanted > 0 ? Math.round((r.held / (r.held + r.wanted)) * 100) : 100);
 
-  const grid = `<div class="lib">${rows.map((r) => `
+  // Framed on the outside of the art: parchment panel, dark cover tiles inside it.
+  const grid = news("", `<div class="lib">${rows.map((r) => `
     <a class="lc" href="/series/${r.id}">
       ${r.cover_path ? `<img loading="lazy" src="/series/${r.id}/cover" alt="">`
                      : `<div class="noimg">no cover</div>`}
@@ -66,7 +69,7 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
       <div class="pb"><i style="width:${pct(r)}%"></i></div>
       <div class="t">${esc(r.title)}</div>
       <div class="s"><span>${r.held} ch</span><span>${esc(r.source ?? "no source")}</span></div>
-    </a>`).join("")}</div>`;
+    </a>`).join("")}</div>`);
 
   const table = news("", `<table>
       <tr><th>series</th><th>held</th><th>queued</th><th>source</th><th>last chapter</th></tr>

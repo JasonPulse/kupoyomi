@@ -1,6 +1,12 @@
 import { db } from "./db.js";
-import { gql, installedExtensions, installExtension, installedSources, sanitize } from "./suwayomi.js";
+import { gql, installedExtensions, installExtension, sanitize } from "./suwayomi.js";
 import type { Candidate } from "./match.js";
+
+type SourceWithExt = { id: string; displayName: string; lang: string; isNsfw: boolean; extension: { pkgName: string } | null };
+
+const sourcesWithExtension = async (): Promise<SourceWithExt[]> =>
+  (await gql<{ sources: { nodes: SourceWithExt[] } }>(
+    `{ sources { nodes { id displayName lang isNsfw extension { pkgName } } } }`)).sources.nodes;
 
 const SEARCH = `mutation($src:LongString!,$q:String!){
   fetchSourceManga(input:{source:$src,type:SEARCH,query:$q,page:1}){ mangas{ id title url } } }`;
@@ -41,7 +47,7 @@ export async function probe(opts: { batch?: number; max?: number; includeNsfw?: 
   if (opts.max) pool = pool.slice(0, opts.max);
   console.log(`${pool.length} extensions left to try, in batches of ${batchSize}\n`);
 
-  const knownSources = new Set((await installedSources()).map((s) => s.id));
+  const knownSources = new Set((await sourcesWithExtension()).map((s) => s.id));
 
   for (let i = 0; i < pool.length; i += batchSize) {
     const batch = pool.slice(i, i + batchSize);
@@ -54,7 +60,7 @@ export async function probe(opts: { batch?: number; max?: number; includeNsfw?: 
       }
     }
     // Whatever those extensions brought with them that we have not searched before.
-    const fresh = (await installedSources()).filter(
+    const fresh = (await sourcesWithExtension()).filter(
       (s) => !knownSources.has(s.id) && (s.lang === "en" || s.lang === "all"));
     for (const s of fresh) knownSources.add(s.id);
 
@@ -76,7 +82,11 @@ export async function probe(opts: { batch?: number; max?: number; includeNsfw?: 
           await p.query("UPDATE import_candidate SET candidates = $1 WHERE id = $2",
             [JSON.stringify(t.candidates), t.id]);
           console.log(`  HIT  ${src.displayName.padEnd(24)} ${t.title.slice(0, 42)}`);
-          for (const pkg of ok) hitsPerPkg.set(pkg, (hitsPerPkg.get(pkg) ?? 0) + 1);
+          // Credit the extension that actually provided this source. Crediting the
+          // whole batch kept 60 of 66 extensions on 156 "hits" that mostly belonged
+          // to a handful of them.
+          const owner = src.extension?.pkgName;
+          if (owner) hitsPerPkg.set(owner, (hitsPerPkg.get(owner) ?? 0) + 1);
         }
       }
     }
@@ -102,4 +112,48 @@ export async function probe(opts: { batch?: number; max?: number; includeNsfw?: 
     `SELECT count(*) n FROM import_candidate
       WHERE confirmed_series_id IS NULL AND jsonb_array_length(candidates) = 0`)).rows[0];
   console.log(`\nstill with no candidate at all: ${still?.n ?? "?"} of ${targets.length}`);
+}
+
+
+/**
+ * Removes extensions the probe installed that nothing actually references.
+ *
+ * A hit-attribution bug credited every extension in a batch for any hit, so 60 of 66
+ * were kept. Every installed extension widens the fan-out of every global search, so
+ * the installed set has to be exactly what is referenced by a binding or a candidate.
+ * Only extensions the probe itself installed are touched.
+ */
+export async function tidyExtensions(opts: { dryRun?: boolean } = {}): Promise<void> {
+  const p = db();
+  const sources = await sourcesWithExtension();
+  const byId = new Map(sources.map((s) => [s.id, s]));
+
+  const referenced = new Set<string>();
+  for (const r of (await p.query<{ source_id: string }>("SELECT DISTINCT source_id FROM series_binding")).rows) {
+    referenced.add(r.source_id);
+  }
+  for (const r of (await p.query<{ candidates: Candidate[] }>("SELECT candidates FROM import_candidate")).rows) {
+    for (const c of r.candidates) referenced.add(c.sourceId);
+  }
+  const neededPkgs = new Set(
+    [...referenced].map((id) => byId.get(id)?.extension?.pkgName).filter((x): x is string => !!x));
+
+  const probed = (await p.query<{ pkg_name: string; kept: boolean }>(
+    "SELECT pkg_name, kept FROM probe_attempt WHERE kept")).rows;
+  const drop = probed.filter((r) => !neededPkgs.has(r.pkg_name));
+
+  console.log(`${referenced.size} sources referenced, needing ${neededPkgs.size} extensions`);
+  console.log(`${probed.length} kept by the probe, ${drop.length} of those referenced by nothing`);
+  if (opts.dryRun || drop.length === 0) return;
+
+  for (const r of drop) {
+    try {
+      await gql(`mutation($pkg:String!){ updateExtension(input:{id:$pkg,patch:{uninstall:true}}){ clientMutationId } }`,
+        { pkg: r.pkg_name });
+    } catch { /* already gone is fine */ }
+    await p.query("UPDATE probe_attempt SET kept = false WHERE pkg_name = $1", [r.pkg_name]);
+    await p.query("UPDATE extension SET desired = false WHERE pkg_name = $1", [r.pkg_name]);
+  }
+  const after = await sourcesWithExtension();
+  console.log(`uninstalled ${drop.length}; sources now ${after.length}`);
 }

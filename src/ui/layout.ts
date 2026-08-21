@@ -4,14 +4,21 @@ export const esc = (s: string): string =>
 const CSS = `
 *{box-sizing:border-box}
 body{font:14px/1.5 -apple-system,system-ui,sans-serif;margin:0;background:#111;color:#ddd}
-header{padding:10px 20px;background:#1b1b1b;border-bottom:1px solid #333;position:sticky;top:0;z-index:5;
-  display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
-header h1{font-size:15px;margin:0;font-weight:600;color:#eee;display:flex;align-items:center;gap:8px}
+header{padding:9px 20px 0;background:#1b1b1b;border-bottom:1px solid #3a3428;position:sticky;top:0;z-index:5;
+  display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap}
+header h1{font-size:15px;margin:0 4px 5px 0;font-weight:600;color:#eee;display:flex;align-items:center;gap:8px}
 header h1 img{border-radius:50%;display:block}
-nav a{color:#8ab;text-decoration:none;font-size:13px;padding:3px 0;border-bottom:2px solid transparent}
-nav a:hover{color:#cde}
-nav a.on{color:#fff;border-bottom-color:#2b6}
-.sub{color:#888;font-size:12px;margin-left:auto}
+/* Tabs cut from the FFXI news header: the parchment strip 9-sliced so it stretches to
+   the label, with the moogle as the active tab's left cap. */
+nav{display:flex;gap:3px;align-items:flex-end}
+nav a{display:inline-block;height:26px;line-height:26px;font-size:12.5px;text-decoration:none;
+  color:#6d6055;border-style:solid;border-width:0 20px 0 20px;
+  border-image:url(/tab-off.png) 0 20 0 20 fill stretch;
+  filter:saturate(.9)}
+nav a:hover{color:#cbbfa8;filter:brightness(1.35)}
+nav a.on{color:#2b2318;font-weight:700;border-width:0 22px 0 30px;
+  border-image-source:url(/tab-on.png);border-image-slice:0 22 0 30;filter:none}
+.sub{color:#888;font-size:12px;margin-left:auto;padding-bottom:6px}
 main{padding:18px 20px;max-width:1200px}
 .card{background:#1a1a1a;border:1px solid #2e2e2e;border-radius:6px;margin-bottom:14px;padding:14px}
 .title{font-weight:600;margin-bottom:2px}

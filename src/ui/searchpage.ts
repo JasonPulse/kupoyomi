@@ -34,7 +34,9 @@ function render(g) {
   // Most chapters first, then prefer an English release over a translated one.
   const en = r => /english/i.test(r.variant||'') ? 0 : 1;
   const best = [...g.rows].sort((a,b)=>(b.chapters??-1)-(a.chapters??-1) || en(a)-en(b));
-  const desc = g.description ? '<div class="desc">'+g.description+'</div>' : '';
+  const desc = g.description
+    ? '<details class="dwrap"><summary class="desc">'+g.description+'</summary><div class="descfull">'+g.description+'</div></details>'
+    : '';
   card.innerHTML =
     '<div class="srch-head">' +
       (g.thumb ? '<img class="cover" loading="lazy" src="'+g.thumb+'">' : '<div class="cover"></div>') +
@@ -73,7 +75,7 @@ function pump() {
     fetch('/api/detail?mangaId='+row.mangaId).then(r=>r.json()).then(d => {
       row.chapters = d.chapters; row.lastUpload = d.lastUpload;
       const g = groups.get(key);
-      if (g && !g.description && d.description) g.description = d.description.slice(0,300);
+      if (g && !g.description && d.description) g.description = d.description;
       if (g && (!g.genres || !g.genres.length) && d.genres) g.genres = d.genres;
       render(g);
     }).catch(()=>{ row.chapters = null; }).finally(()=>{ active--; pump(); });
@@ -97,11 +99,39 @@ document.addEventListener('submit', ev => {
     .catch(() => { b.disabled = false; b.textContent = 'retry'; });
 });
 
+// One site listed the same work as 'TS Villainess RTA' and 'TS Villianess RTA'. A
+// transposed letter is a typo, not a different series, so keys within a couple of edits
+// of an existing one are folded in. Only for long keys: on a short key two edits is a
+// different word entirely.
+function edits(a, b, cap) {
+  if (Math.abs(a.length - b.length) > cap) return cap + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j-1] + 1, prev[j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+      if (cur[j] < best) best = cur[j];
+    }
+    if (best > cap) return cap + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+function mergeKey(k) {
+  if (k.length < 14) return k;
+  for (const existing of groups.keys()) {
+    if (existing.length < 14) continue;
+    if (edits(k, existing, 2) <= 2) return existing;
+  }
+  return k;
+}
+
 const es = new EventSource('/api/search?q='+encodeURIComponent(q));
 let seen = 0;
 es.addEventListener('hit', e => {
   const h = JSON.parse(e.data);
-  const key = workKey(h.title);
+  const key = mergeKey(workKey(h.title));
   let g = groups.get(key);
   if (!g) { g = { key, title: h.title, thumb: h.thumb, rows: [], have: window.HAVE[norm(h.title)] }; groups.set(key, g); }
   if (!g.thumb && h.thumb) g.thumb = h.thumb;
@@ -127,7 +157,10 @@ const EXTRA_CSS = `
 .srch-head{display:flex;gap:16px;margin-bottom:12px;align-items:flex-start}
 .cover{width:190px;height:272px;object-fit:cover;border-radius:4px;background:#242424;flex:0 0 auto}
 .srch-body{min-width:0}
-.desc{color:#999;font-size:12.5px;margin-top:7px;display:-webkit-box;-webkit-line-clamp:8;-webkit-box-orient:vertical;overflow:hidden}
+.desc{color:#999;font-size:12.5px;margin-top:7px;display:-webkit-box;-webkit-line-clamp:10;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;list-style:none}
+.desc::-webkit-details-marker{display:none}
+.dwrap[open] .desc{display:none}
+.descfull{color:#999;font-size:12.5px;margin-top:7px;white-space:pre-wrap}
 table.srcs th:nth-child(2),table.srcs td:nth-child(2){max-width:220px}
 table.srcs th:nth-child(3),table.srcs td:nth-child(3){width:88px}
 table.srcs th:nth-child(4),table.srcs td:nth-child(4){width:110px}

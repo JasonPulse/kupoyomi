@@ -2,6 +2,11 @@ import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+
+// A DATE column has no time and no zone. Left to its default, pg parses it into a
+// JS Date at local midnight, which shifts the day across a timezone boundary and
+// stringifies without a year. Keep it as the "YYYY-MM-DD" the database sent.
+pg.types.setTypeParser(1082, (v: string) => v);
 import { config } from "./config.js";
 import type { Stranded } from "./match.js";
 

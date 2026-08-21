@@ -1,6 +1,6 @@
 import { db } from "./db.js";
 import { confirmCandidate } from "./confirm.js";
-import { fmt } from "./held.js";
+import { fmt, ago } from "./held.js";
 import { archiveCandidate } from "./archive.js";
 
 const esc = (s: string): string =>
@@ -44,6 +44,8 @@ type CmpRow = {
 
 export async function reviewPage(): Promise<string> {
   const p = db();
+  // Taken from the database so the page and the data agree on what "now" is.
+  const today = (await p.query<{ d: string }>("SELECT current_date::text AS d")).rows[0]?.d ?? "";
   const cands = (await p.query<CandRow>(
     `SELECT ic.id, ic.folder, ic.dead_source, ic.file_count, ic.resolved_title,
             ic.held_count, ic.held_lo, ic.held_hi, lm.status
@@ -144,7 +146,7 @@ export async function reviewPage(): Promise<string> {
             <td class="${beyond > 0 ? "rec" : "dim"}"><b>${beyond > 0 ? `+${beyond}` : "0"}</b></td>
             <td class="${fills > 0 ? "rec" : "dim"}">${fills > 0 ? `+${fills}` : "0"}</td>
             <td class="dim">${absent > 0 ? absent : "-"}</td>
-            <td class="dim">${o.last_upload ? esc(String(o.last_upload).slice(0, 10)) : "-"}${
+            <td class="dim">${esc(ago(o.last_upload, today))}${
               groups ? `<div class="latest">${esc(groups.slice(0, 40))}</div>` : ""}</td>
             <td>${ok ? `<form method="post" action="/confirm">
               <input type="hidden" name="id" value="${k.id}">

@@ -61,3 +61,17 @@ export const fmt = (n: number | string | null): string => {
   const v = Number(n);
   return Number.isFinite(v) ? String(Number(v.toFixed(4))) : "-";
 };
+
+/** "2026-05-10 (3mo ago)". Freshness is the point: a source that stopped publishing
+ *  a year ago is a different proposition from one that posted last week. */
+export const ago = (date: string | null, today: string): string => {
+  if (!date) return "-";
+  const d = String(date).slice(0, 10);
+  const days = Math.round((Date.parse(today) - Date.parse(d)) / 86400000);
+  if (!Number.isFinite(days)) return d;
+  const rel = days < 1 ? "today" : days < 14 ? `${days}d ago`
+    : days < 60 ? `${Math.round(days / 7)}w ago`
+    : days < 730 ? `${Math.round(days / 30)}mo ago`
+    : `${(days / 365).toFixed(1)}y ago`;
+  return `${d} (${rel})`;
+};

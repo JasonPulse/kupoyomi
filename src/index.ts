@@ -7,6 +7,7 @@ import { listCandidates, confirmCandidate } from "./confirm.js";
 import { remap } from "./remap.js";
 import { backfillUrls } from "./backfill.js";
 import { relayout } from "./relayout.js";
+import { parseCheck } from "./parsecheck.js";
 import { serve } from "./server.js";
 
 const usage = `kupoyomi <command>
@@ -22,6 +23,7 @@ const usage = `kupoyomi <command>
   confirm <id> --pick <mangaId>  bind a stranded series to the source you chose
   remap <seriesId> [--dry-run]   adopt stranded files into the confirmed binding
   relayout [seriesId] [--dry-run] move chapters into the canonical tree
+  parse-check                how well chapter numbers can be read from filenames
   serve                      http api + extension bootstrap (long running)
 
 report, find and compare are read-only.
@@ -84,6 +86,9 @@ const main = async (): Promise<void> => {
       await closeDb();
       break;
     }
+    case "parse-check":
+      await parseCheck();
+      break;
     case "relayout": {
       const sid = Number(process.argv[3]);
       await relayout({

@@ -11,6 +11,7 @@ import { relayout } from "./relayout.js";
 import { prune } from "./prune.js";
 import { probe, tidyExtensions } from "./probe.js";
 import { scanWanted, fetchWanted } from "./fetch.js";
+import { checkStalled } from "./schedule.js";
 import { parseCheck } from "./parsecheck.js";
 import { serve } from "./server.js";
 
@@ -33,6 +34,7 @@ const usage = `kupoyomi <command>
   tidy [--dry-run]           uninstall probe extensions nothing references
   scan [seriesId]            queue chapters the bound source has and we do not
   fetch [--limit N]          download queued chapters
+  stalled                    flag series whose source has gone quiet
   parse-check                how well chapter numbers can be read from filenames
   serve                      http api + extension bootstrap (long running)
 
@@ -119,6 +121,12 @@ const main = async (): Promise<void> => {
     case "fetch": {
       const lim = flag("limit");
       await fetchWanted(lim !== undefined ? { limit: Number(lim) } : {});
+      await closeDb();
+      break;
+    }
+    case "stalled": {
+      const n = await checkStalled();
+      console.log(`newly flagged: ${n}`);
       await closeDb();
       break;
     }

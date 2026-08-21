@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { db } from "./db.js";
 import { installedExtensions, installExtension, serverAbout, fetchExtensionIndex } from "./suwayomi.js";
 import { reviewPage, handleConfirmPost, handleArchivePost } from "./web.js";
+import { startScheduler, state as schedState, checkStalled } from "./schedule.js";
 
 /**
  * Suwayomi runs on emptyDir, so on every cold start it comes up with no extensions
@@ -79,7 +80,10 @@ const stats = async (): Promise<Record<string, unknown>> => {
     needs_review: await q("SELECT count(*) n FROM import_candidate WHERE match_kind = 'review' AND confirmed_series_id IS NULL"),
     stalled: await q("SELECT count(*) n FROM series WHERE stalled_since IS NOT NULL AND NOT muted"),
     extensions_desired: await q("SELECT count(*) n FROM extension WHERE desired"),
+    wanted_outstanding: await q("SELECT count(*) n FROM wanted WHERE state <> 'done'"),
+    wanted_failed: await q("SELECT count(*) n FROM wanted WHERE state = 'failed' AND attempts >= 4"),
     last_reconcile: lastReconcile,
+    scheduler: schedState,
   };
 };
 
@@ -90,6 +94,8 @@ export async function serve(): Promise<void> {
   // whether Suwayomi is answering yet, or the probe cannot tell "still booting"
   // from "broken".
   void bootstrapLoop();
+  if (process.env["SCHEDULER"] !== "off") startScheduler();
+  else console.log("scheduler: disabled by SCHEDULER=off");
   serverAbout().then((a) => console.log(`suwayomi ${a.version} (${a.revision})`)).catch(() => {});
 
   createServer((req, res) => {

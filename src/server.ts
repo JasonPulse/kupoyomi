@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { db } from "./db.js";
 import { installedExtensions, installExtension, serverAbout, fetchExtensionIndex } from "./suwayomi.js";
-import { reviewPage, handleConfirmPost } from "./web.js";
+import { reviewPage, handleConfirmPost, handleArchivePost } from "./web.js";
 
 /**
  * Suwayomi runs on emptyDir, so on every cold start it comes up with no extensions
@@ -106,11 +106,12 @@ export async function serve(): Promise<void> {
       }).catch((e: unknown) => send(500, { error: e instanceof Error ? e.message : String(e) }));
       return;
     }
-    if (url === "/confirm" && req.method === "POST") {
+    if ((url === "/confirm" || url === "/archive") && req.method === "POST") {
+      const handler = url === "/archive" ? handleArchivePost : handleConfirmPost;
       let body = "";
       req.on("data", (chunk) => { body += chunk; });
       req.on("end", () => {
-        handleConfirmPost(body).then((to) => {
+        handler(body).then((to) => {
           res.writeHead(303, { location: to });
           res.end();
         }).catch((e: unknown) => send(400, { error: e instanceof Error ? e.message : String(e) }));

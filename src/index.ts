@@ -5,6 +5,7 @@ import { snapshot } from "./snapshot.js";
 import { seedLedger } from "./seed.js";
 import { listCandidates, confirmCandidate } from "./confirm.js";
 import { remap } from "./remap.js";
+import { archiveCandidate } from "./archive.js";
 import { backfillUrls } from "./backfill.js";
 import { relayout } from "./relayout.js";
 import { parseCheck } from "./parsecheck.js";
@@ -22,6 +23,7 @@ const usage = `kupoyomi <command>
   candidates [--id N]        what needs a decision, with the numbers to decide on
   confirm <id> --pick <mangaId>  bind a stranded series to the source you chose
   remap <seriesId> [--dry-run]   adopt stranded files into the confirmed binding
+  archive <id> [--dry-run]   file a finished series: adopt its files, bind no source
   relayout [seriesId] [--dry-run] move chapters into the canonical tree
   parse-check                how well chapter numbers can be read from filenames
   serve                      http api + extension bootstrap (long running)
@@ -76,6 +78,13 @@ const main = async (): Promise<void> => {
       const pick = Number(flag("pick"));
       if (!Number.isInteger(id) || !Number.isInteger(pick)) throw new Error("usage: confirm <id> --pick <mangaId>");
       await confirmCandidate(id, pick);
+      await closeDb();
+      break;
+    }
+    case "archive": {
+      const cid = Number(process.argv[3]);
+      if (!Number.isInteger(cid)) throw new Error("usage: archive <candidateId> [--dry-run]");
+      await archiveCandidate(cid, { dryRun: process.argv.includes("--dry-run") });
       await closeDb();
       break;
     }

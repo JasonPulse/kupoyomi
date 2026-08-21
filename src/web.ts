@@ -1,6 +1,7 @@
 import { db } from "./db.js";
 import { confirmCandidate } from "./confirm.js";
 import { fmt } from "./held.js";
+import { archiveCandidate } from "./archive.js";
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -98,7 +99,12 @@ export async function reviewPage(): Promise<string> {
 
     return `<div class="card">
       <div class="title">${esc(title)}</div>
-      <div class="meta">${yours} &middot; stranded under ${esc(k.dead_source ?? "-")}</div>
+      <div class="meta">${yours} &middot; stranded under ${esc(k.dead_source ?? "-")}
+        <form method="post" action="/archive" style="display:inline;margin-left:10px">
+          <input type="hidden" name="id" value="${k.id}">
+          <button class="weak" type="submit" title="Finished series: keep the files, bind no source, stop asking">
+            finished &mdash; no migration needed</button>
+        </form></div>
       <table><tr><th>source</th><th>their range</th><th>adds</th><th>loses</th><th>last upload</th><th></th></tr>
       ${rows}</table></div>`;
   }).join("");
@@ -109,6 +115,13 @@ export async function reviewPage(): Promise<string> {
       <div class="sub">${cands.length} awaiting a decision &middot; ${done?.n ?? 0} confirmed &middot;
       ledger ${led?.s ?? 0} series / ${led?.c ?? 0} chapters</div></header>
     <main>${cards || "<p class=dim>nothing awaiting confirmation.</p>"}</main></body></html>`;
+}
+
+export async function handleArchivePost(body: string): Promise<string> {
+  const id = Number(new URLSearchParams(body).get("id"));
+  if (!Number.isInteger(id)) throw new Error("bad form");
+  await archiveCandidate(id);
+  return "/";
 }
 
 export async function handleConfirmPost(body: string): Promise<string> {

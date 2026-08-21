@@ -2,6 +2,11 @@ import { createServer } from "node:http";
 import { db } from "./db.js";
 import { installedExtensions, installExtension, serverAbout, fetchExtensionIndex } from "./suwayomi.js";
 import { reviewPage, handleConfirmPost, handleArchivePost } from "./web.js";
+import { libraryPage } from "./ui/library.js";
+import { searchPage, addSeries } from "./ui/search.js";
+import { seriesPage } from "./ui/series.js";
+import { queuePage } from "./ui/queue.js";
+import { scanWanted } from "./fetch.js";
 import { startScheduler, state as schedState, checkStalled } from "./schedule.js";
 
 /**
@@ -98,37 +103,72 @@ export async function serve(): Promise<void> {
   else console.log("scheduler: disabled by SCHEDULER=off");
   serverAbout().then((a) => console.log(`suwayomi ${a.version} (${a.revision})`)).catch(() => {});
 
+  const readBody = (req: import("node:http").IncomingMessage): Promise<string> =>
+    new Promise((resolve) => {
+      let b = "";
+      req.on("data", (c) => { b += c; });
+      req.on("end", () => resolve(b));
+    });
+
   createServer((req, res) => {
-    const url = req.url ?? "/";
+    const url = new URL(req.url ?? "/", "http://x");
+    const path = url.pathname;
     const send = (code: number, body: unknown): void => {
       res.writeHead(code, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
-    if (url === "/healthz") return send(200, { ok: true });
-    if (url === "/" && req.method === "GET") {
-      reviewPage().then((html) => {
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(html);
-      }).catch((e: unknown) => send(500, { error: e instanceof Error ? e.message : String(e) }));
-      return;
-    }
-    if ((url === "/confirm" || url === "/archive") && req.method === "POST") {
-      const handler = url === "/archive" ? handleArchivePost : handleConfirmPost;
-      let body = "";
-      req.on("data", (chunk) => { body += chunk; });
-      req.on("end", () => {
-        handler(body).then((to) => {
-          res.writeHead(303, { location: to });
-          res.end();
-        }).catch((e: unknown) => send(400, { error: e instanceof Error ? e.message : String(e) }));
-      });
-      return;
-    }
-    if (url === "/api/stats") {
+    const html = (p: Promise<string>): void => {
+      p.then((h) => { res.writeHead(200, { "content-type": "text/html; charset=utf-8" }); res.end(h); })
+       .catch((e: unknown) => send(500, { error: e instanceof Error ? e.message : String(e) }));
+    };
+    const redirect = (to: string): void => { res.writeHead(303, { location: to }); res.end(); };
+
+    if (path === "/healthz") return send(200, { ok: true });
+    if (path === "/api/stats") {
       stats().then((s) => send(200, s)).catch((e: unknown) =>
         send(503, { error: e instanceof Error ? e.message : String(e) }));
       return;
     }
+
+    if (req.method === "GET") {
+      if (path === "/") return html(libraryPage(url.searchParams.get("q") ?? undefined));
+      if (path === "/search") return html(searchPage(url.searchParams.get("q") ?? undefined));
+      if (path === "/review") return html(reviewPage());
+      if (path === "/queue") return html(queuePage());
+      const m = /^\/series\/(\d+)$/.exec(path);
+      if (m) return html(seriesPage(Number(m[1])));
+    }
+
+    if (req.method === "POST") {
+      const act = async (): Promise<string> => {
+        const body = await readBody(req);
+        const form = new URLSearchParams(body);
+        if (path === "/confirm") return handleConfirmPost(body);
+        if (path === "/archive") return handleArchivePost(body);
+        if (path === "/add") {
+          const id = await addSeries({
+            title: form.get("title") ?? "", sourceId: form.get("sourceId") ?? "",
+            sourceName: form.get("sourceName") ?? "", url: form.get("url") ?? "",
+          });
+          // Queue whatever the new source already has, so adding a series does
+          // something visible instead of just creating a row.
+          await scanWanted({ seriesId: id }).catch(() => undefined);
+          return `/series/${id}`;
+        }
+        const scan = /^\/series\/(\d+)\/scan$/.exec(path);
+        if (scan) { await scanWanted({ seriesId: Number(scan[1]) }); return `/series/${scan[1]}`; }
+        const mute = /^\/series\/(\d+)\/mute$/.exec(path);
+        if (mute) {
+          await db().query("UPDATE series SET muted = NOT muted WHERE id = $1", [Number(mute[1])]);
+          return `/series/${mute[1]}`;
+        }
+        throw new Error("not found");
+      };
+      act().then(redirect).catch((e: unknown) =>
+        send(400, { error: e instanceof Error ? e.message : String(e) }));
+      return;
+    }
+
     send(404, { error: "not found" });
   }).listen(port, () => console.log(`kupoyomi listening on :${port}`));
 }

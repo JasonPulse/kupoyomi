@@ -3,30 +3,9 @@ import { confirmCandidate } from "./confirm.js";
 import { fmt, ago } from "./held.js";
 import { archiveCandidate } from "./archive.js";
 
-const esc = (s: string): string =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+import { esc, page } from "./ui/layout.js";
 
-const CSS = `
-body{font:14px/1.5 -apple-system,system-ui,sans-serif;margin:0;background:#111;color:#ddd}
-header{padding:14px 20px;background:#1b1b1b;border-bottom:1px solid #333;position:sticky;top:0}
-h1{font-size:16px;margin:0;font-weight:600}
-.sub{color:#888;font-size:12px;margin-top:3px}
-main{padding:20px;max-width:1100px}
-.card{background:#1a1a1a;border:1px solid #2e2e2e;border-radius:6px;margin-bottom:14px;padding:14px}
-.title{font-weight:600;margin-bottom:2px}
-.meta{color:#888;font-size:12px;margin-bottom:10px}
-table{border-collapse:collapse;width:100%;font-size:13px}
-th{text-align:left;color:#888;font-weight:500;padding:4px 8px;border-bottom:1px solid #333}
-td{padding:5px 8px;border-bottom:1px solid #242424;vertical-align:top}
-.rec{color:#7ec699}.bad{color:#c98b7e}.dim{color:#777}
-.badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;background:#232;color:#9b9;border:1px solid #343}
-.actions{margin-top:10px;padding-top:9px;border-top:1px solid #262626;display:flex;gap:8px;align-items:center}
-.actions .hint{color:#666;font-size:11px}
-button{background:#2b6;border:0;color:#062;font-weight:600;padding:4px 10px;border-radius:4px;cursor:pointer}
-button.weak{background:#444;color:#bbb}
-.latest{color:#777;font-size:11px;white-space:pre-line}
-a{color:#6ab}
-`;
+
 
 type CandRow = {
   id: number; folder: string; dead_source: string | null; file_count: number; resolved_title: string | null;
@@ -178,12 +157,9 @@ export async function reviewPage(): Promise<string> {
       </div></div>`;
   }).join("");
 
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Kupoyomi review</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1"><style>${CSS}</style></head><body>
-    <header><h1>Kupoyomi &mdash; migration review</h1>
-      <div class="sub">${openCands.length} awaiting a decision &middot; ${finishedCands.length} look finished &middot; ${done?.n ?? 0} confirmed &middot;
-      ledger ${led?.s ?? 0} series / ${led?.c ?? 0} chapters</div></header>
-    <main>${cards || "<p class=dim>nothing awaiting confirmation.</p>"}</main></body></html>`;
+  return page("review",
+    `${openCands.length} awaiting a decision &middot; ${finishedCands.length} look finished &middot; ${done?.n ?? 0} confirmed`,
+    cards || '<div class="card dim">nothing awaiting confirmation.</div>');
 }
 
 export async function handleArchivePost(body: string): Promise<string> {

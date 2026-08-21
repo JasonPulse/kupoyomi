@@ -157,17 +157,17 @@ const EXTRA_CSS = `
 .srch-head{display:flex;gap:16px;margin-bottom:12px;align-items:flex-start}
 .cover{width:190px;height:272px;object-fit:cover;border-radius:4px;background:#242424;flex:0 0 auto}
 .srch-body{min-width:0}
-.desc{color:#999;font-size:12.5px;margin-top:7px;display:-webkit-box;-webkit-line-clamp:10;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;list-style:none}
+.desc{color:#4a4034;font-size:12.5px;margin-top:7px;display:-webkit-box;-webkit-line-clamp:10;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;list-style:none}
 .desc::-webkit-details-marker{display:none}
 .dwrap[open] .desc{display:none}
-.descfull{color:#999;font-size:12.5px;margin-top:7px;white-space:pre-wrap}
+.descfull{color:#4a4034;font-size:12.5px;margin-top:7px;white-space:pre-wrap}
 table.srcs th:nth-child(2),table.srcs td:nth-child(2){max-width:220px}
 table.srcs th:nth-child(3),table.srcs td:nth-child(3){width:88px}
 table.srcs th:nth-child(4),table.srcs td:nth-child(4){width:110px}
 table.srcs th:nth-child(5),table.srcs td:nth-child(5){width:96px;text-align:right}
 td.act{text-align:right}
 td.act form{display:inline}
-.spin{color:#666;font-size:11px}
+.spin{color:#7a6d58;font-size:11px}
 button[disabled]{opacity:.4;cursor:default}
 `;
 

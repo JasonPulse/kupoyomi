@@ -3,15 +3,11 @@ export const esc = (s: string): string =>
 
 const CSS = `
 *{box-sizing:border-box}
-body{font:14px/1.5 -apple-system,system-ui,sans-serif;margin:0;background:#111;color:#ddd}
+body{font:14px/1.5 -apple-system,system-ui,sans-serif;margin:0;background:#141414;color:#ddd}
 header{padding:9px 20px 0;background:#1b1b1b;border-bottom:1px solid #3a3428;position:sticky;top:0;z-index:5;
   display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap}
 header h1{font-size:15px;margin:0 4px 5px 0;font-weight:600;color:#eee;display:flex;align-items:center;gap:8px}
 header h1 img{border-radius:50%;display:block}
-/* One tab carries the parchment, the rest are plain text. Seven bright bars fought the
-   content, and dimming them made the labels illegible -- so the art marks the active
-   page instead of decorating every tab. The moogle is the strip's own left end and
-   travels along the bar as you navigate. */
 nav{display:flex;gap:6px;align-items:flex-end}
 nav a{display:inline-block;height:28px;line-height:28px;padding:0 10px;font-size:12.5px;
   text-decoration:none;color:#9a9aa2;border-radius:3px 3px 0 0}
@@ -21,52 +17,58 @@ nav a.on{color:#2b2318;font-weight:700;padding:0 6px 0 4px;background:none;
   border-image:url(/tab-on.png) 0 20 0 32 fill stretch}
 .sub{color:#888;font-size:12px;margin-left:auto;padding-bottom:6px}
 main{padding:18px 20px;max-width:1200px}
-.card{background:#1a1a1a;border:1px solid #2e2e2e;border-radius:6px;margin-bottom:14px;padding:14px}
-.title{font-weight:600;margin-bottom:2px}
-.meta{color:#888;font-size:12px;margin-bottom:10px}
+
+/* Every panel is an FFXI news window: caps top and bottom as pseudo-elements so no
+   markup changes, with the middle tiling vertically. One visual language throughout,
+   rather than parchment on some pages and dark cards on others. */
+.card,.tile{position:relative;background:url(/newsmiddle.png) repeat-y center top;background-size:100% auto;
+  color:#2a241c;padding:12px 26px;margin-bottom:16px}
+.card::before,.tile::before,.card::after,.tile::after{content:"";position:absolute;left:0;right:0;height:27px;
+  background:url(/newstop.png) no-repeat center top;background-size:100% 100%}
+.card::before,.tile::before{top:-25px}
+.card::after,.tile::after{bottom:-25px;background-image:url(/newsbottom.png)}
+.card{margin-top:26px}
+.tile{margin:26px 0 16px;padding:10px 18px}
+
+/* Dark ink on parchment, since the panels are now light. */
+.title{font-weight:700;margin-bottom:2px;color:#2b2318}
+.meta,.dim,.n{color:#6b5f4c;font-size:12px}
+.card h2{font-size:14px;margin:0 0 9px;font-weight:700;color:#3a3025}
+.card a,.tile a{color:#4a3a7a}
+.rec{color:#2f6b3a}.bad{color:#9b3226}.warn{color:#8a5a12}
 table{border-collapse:collapse;width:100%;font-size:13px}
-th{text-align:left;color:#888;font-weight:500;padding:5px 8px;border-bottom:1px solid #333;white-space:nowrap}
-td{padding:5px 8px;border-bottom:1px solid #242424;vertical-align:top}
-tr:hover td{background:#1e1e1e}
-.rec{color:#7ec699}.bad{color:#c98b7e}.dim{color:#777}.warn{color:#c9b27e}
-.badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;background:#232;color:#9b9;border:1px solid #343}
-.actions{margin-top:10px;padding-top:9px;border-top:1px solid #262626;display:flex;gap:8px;align-items:center}
-.actions .hint{color:#666;font-size:11px}
-button{background:#2b6;border:0;color:#052;font-weight:600;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:13px}
-button.weak{background:#3a3a3a;color:#bbb}
-button:hover{filter:brightness(1.15)}
-input[type=search],input[type=text]{background:#0d0d0d;border:1px solid #3a3a3a;color:#eee;
+th{text-align:left;color:#6b5f4c;font-weight:600;padding:5px 8px;border-bottom:1px solid rgba(0,0,0,.22);white-space:nowrap}
+td{padding:5px 8px;border-bottom:1px solid rgba(0,0,0,.09);vertical-align:top}
+tr:hover td{background:rgba(0,0,0,.05)}
+.badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;
+  background:rgba(0,0,0,.10);color:#5a4d3a;border:1px solid rgba(0,0,0,.18)}
+.actions{margin-top:10px;padding-top:9px;border-top:1px solid rgba(0,0,0,.14);display:flex;gap:8px;align-items:center}
+.actions .hint{color:#6b5f4c;font-size:11px}
+button{background:#5d8a4a;border:1px solid #476b38;color:#f2f6ee;font-weight:600;
+  padding:4px 10px;border-radius:4px;cursor:pointer;font-size:13px}
+button.weak{background:#cdc3ab;border-color:#a99d84;color:#3a3025}
+button:hover{filter:brightness(1.08)}
+button[disabled]{opacity:.45;cursor:default}
+input[type=search],input[type=text]{background:#fdfaf1;border:1px solid #a99d84;color:#2b2318;
   padding:6px 10px;border-radius:4px;font-size:13px;min-width:320px}
-a.series{color:#cde;text-decoration:none}a.series:hover{text-decoration:underline}
-.bar{height:5px;background:#2a2a2a;border-radius:3px;overflow:hidden;min-width:70px}
-.bar > i{display:block;height:100%;background:#2b6}
+a.series{color:#4a3a7a;text-decoration:none}a.series:hover{text-decoration:underline}
+.bar{height:5px;background:rgba(0,0,0,.16);border-radius:3px;overflow:hidden;min-width:70px}
+.bar > i{display:block;height:100%;background:#6b4fa0}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
-/* The FFXI news window: caps top and bottom with the middle tiling vertically, which is
-   exactly how the art was drawn. Deliberately parchment against the dark app. */
-.news{background:url(/newsmiddle.png) repeat-y center top;background-size:100% auto;
-  color:#2a241c;padding:2px 0;margin-bottom:16px}
-.news .cap{height:27px;background:url(/newstop.png) no-repeat center top;background-size:100% 100%}
-.news .cap.b{background-image:url(/newsbottom.png)}
-.news .inner{padding:4px 26px 12px}
-.news h2{font-size:14px;margin:0 0 9px;font-weight:700;letter-spacing:.02em;color:#3a3025}
-.news table{color:#2a241c}
-.news th{color:#6b5f4c;border-bottom:1px solid rgba(0,0,0,.18)}
-.news td{border-bottom:1px solid rgba(0,0,0,.08)}
-.news tr:hover td{background:rgba(0,0,0,.05)}
-.news a{color:#4a3a7a}
-.news .dim{color:#6b5f4c}
-.news .bar{background:rgba(0,0,0,.15)}
-.news .bar > i{background:#6b4fa0}
-.tile{background:#1a1a1a;border:1px solid #2e2e2e;border-radius:6px;padding:11px}
-.tile .n{font-size:12px;color:#888}
+.grid .tile{margin:26px 0 4px}
+
+/* Cover art stays dark inside the parchment, so it reads as art laid on paper. */
+.lc,.bt{background:#1d1d22;border:1px solid #3a3a44;box-shadow:0 1px 5px rgba(0,0,0,.35)}
+.lc .t,.bt .n{color:#dde}
+.lc .s{color:#9a9aa5}
+.cover{background:#2a2a30}
 `;
 
 export type Nav = "library" | "browse" | "search" | "review" | "queue" | "downloads" | "extensions";
 
 /** A parchment panel, for the primary content of a page. */
 export const news = (title: string, inner: string): string =>
-  `<div class="news"><div class="cap"></div><div class="inner">${
-    title ? `<h2>${title}</h2>` : ""}${inner}</div><div class="cap b"></div></div>`;
+  `<div class="card">${title ? `<h2>${title}</h2>` : ""}${inner}</div>`;
 
 export function page(active: Nav, subtitle: string, body: string): string {
   const link = (id: Nav, href: string, label: string): string =>

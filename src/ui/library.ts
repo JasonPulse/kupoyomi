@@ -11,23 +11,20 @@ type Row = {
 
 const EXTRA = `
 .lib{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px}
-.news .lc{box-shadow:0 1px 4px rgba(0,0,0,.35);border-color:#3a3a44}
-.news .lc .t{color:#dde}
-.lc{position:relative;border-radius:5px;overflow:hidden;background:#191919;border:1px solid #2c2c2c;
-  text-decoration:none;display:block}
+.lc{position:relative;border-radius:5px;overflow:hidden;text-decoration:none;display:block}
 .lc img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#242424}
 .lc .noimg{width:100%;aspect-ratio:2/3;background:linear-gradient(160deg,#2a2438,#1b1b22);
   display:flex;align-items:center;justify-content:center;color:#544c66;font-size:11px}
 .lc .t{padding:7px 8px 4px;font-size:12px;line-height:1.3;color:#dde;height:47px;overflow:hidden}
 .lc .s{padding:0 8px 8px;font-size:11px;color:#8a8a95;display:flex;justify-content:space-between;gap:6px}
-.lc .flag{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.72);border-radius:3px;
-  padding:1px 6px;font-size:10px;color:#e2c98a}
-.lc:hover{border-color:#4a4a58}
+.lc .flag{position:absolute;top:6px;right:6px;background:rgba(0,0,0,.78);border-radius:3px;
+  padding:1px 6px;font-size:10px;color:#f0d9a0;z-index:1}
+.lc:hover{border-color:#6b5f9a}
 .lc .pb{height:4px;background:#2a2a2a}
 .lc .pb > i{display:block;height:100%;background:#2b6}
 .vw{margin-bottom:12px}
-.vw a{color:#8ab;text-decoration:none;font-size:12px;margin-right:12px}
-.vw a.on{color:#fff;font-weight:600}
+.vw a{color:#4a3a7a;text-decoration:none;font-size:12px;margin-right:12px}
+.vw a.on{color:#2b2318;font-weight:700}
 `;
 
 export async function libraryPage(q?: string, view = "grid"): Promise<string> {

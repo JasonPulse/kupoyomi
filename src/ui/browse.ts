@@ -65,13 +65,13 @@ export async function browseIndex(): Promise<string> {
 
 const EXTRA = `
 .grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:14px}
-.bt{background:#1a1a1a;border:1px solid #2e2e2e;border-radius:6px;overflow:hidden}
+.bt{border-radius:6px;overflow:hidden}
 .bt img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#222}
 .bt .n{padding:8px 9px;font-size:13px;line-height:1.35;height:58px;overflow:hidden}
 .bt .f{padding:0 8px 8px;display:flex;justify-content:space-between;align-items:center;font-size:11px}
 .chips{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}
-.chip{font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid #3a3a3a;color:#bbb;text-decoration:none}
-.chip.on{background:#2b6;color:#052;border-color:#2b6;font-weight:600}
+.chip{font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.25);color:#4a4034;text-decoration:none}
+.chip.on{background:#5d8a4a;color:#f2f6ee;border-color:#476b38;font-weight:700}
 `;
 
 export async function browseSource(sourceId: string, type: string, filters: string[]): Promise<string> {

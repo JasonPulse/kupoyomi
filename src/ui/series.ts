@@ -47,7 +47,7 @@ export async function seriesPage(id: number): Promise<string> {
     `${chapters.length} held &middot; ${wanted.length} queued &middot; ${gaps.length} gaps`,
     `<style>.hero{display:flex;gap:18px;align-items:flex-start}
        .hero img{width:210px;height:300px;object-fit:cover;border-radius:5px;background:#242424;flex:0 0 auto}
-       .hero .syn{color:#aaa;font-size:13px;margin-top:9px;white-space:pre-wrap}</style>
+       .hero .syn{color:#4a4034;font-size:13px;margin-top:9px;white-space:pre-wrap}</style>
      <div class="card">
        <div class="hero">
        ${s.cover_path ? `<img src="/series/${id}/cover" alt="">` : `<img alt="">`}

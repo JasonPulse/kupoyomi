@@ -131,14 +131,55 @@ export async function compare(mangaId: number) {
 
 
 /**
+ * Query variants, widest match kept last.
+ *
+ * Sites index titles with straight punctuation, so a stored title carrying a curly
+ * apostrophe finds nothing: "I’m being raised by villains" returned 0 results where
+ * "I'm being raised by villains" returned the right entry. Being liberal with the query
+ * is safe because the match is on url, which is exact -- a wider search cannot produce
+ * a wrong answer, only a slower one.
+ */
+export function queryVariants(title: string): string[] {
+  const straight = title
+    .replace(/[\u2018\u2019\u02bc]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/\u2026/g, "...");
+  const stripped = straight.replace(/['"!?,.:;~*]/g, "").replace(/\s+/g, " ").trim();
+  const words = stripped.split(" ");
+  const out = [title, straight, stripped];
+  // The part before a colon or dash is how long light-novel titles are usually
+  // indexed: "7th Time Loop: The Villainess..." is listed as "7th Time Loop".
+  const head = straight.split(/\s*[:\u2013\u2014-]\s+|:/)[0]?.trim();
+  if (head && head !== straight && head.length >= 4) out.push(head);
+  // Last resorts: drop the leading pronoun many titles start with, then a word prefix.
+  if (words.length > 3) out.push(words.slice(1).join(" "));
+  if (words.length > 5) out.push(words.slice(0, 5).join(" "));
+  return [...new Set(out.filter((q) => q.length >= 4))];
+}
+
+/** Sources are inconsistent about the trailing slash on a manga url. */
+const sameUrl = (a: string, b: string): boolean =>
+  a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+
+/**
  * Resolves a stable (source, url) pair to a manga id on whichever Suwayomi we are
- * talking to now. Searching by title and matching on url is deterministic and does
- * not care that the instance was rebuilt from scratch.
+ * talking to now. Searching and matching on url is deterministic and does not care
+ * that the instance was rebuilt from scratch.
  */
 export async function resolveManga(sourceId: string, title: string, url: string): Promise<number> {
-  const hits = (await gql<{ fetchSourceManga: { mangas: Array<{ id: number; title: string; url: string }> } }>(
-    SEARCH, { src: sourceId, q: title })).fetchSourceManga.mangas;
-  const exact = hits.find((m) => m.url === url);
-  if (!exact) throw new Error(`source ${sourceId} no longer returns ${url} when searching "${title}"`);
-  return exact.id;
+  const tried: string[] = [];
+  for (const q of queryVariants(title)) {
+    tried.push(q);
+    let hits: Array<{ id: number; title: string; url: string }>;
+    try {
+      hits = (await gql<{ fetchSourceManga: { mangas: Array<{ id: number; title: string; url: string }> } }>(
+        SEARCH, { src: sourceId, q })).fetchSourceManga.mangas;
+    } catch {
+      continue;
+    }
+    const exact = hits.find((m) => sameUrl(m.url, url));
+    if (exact) return exact.id;
+  }
+  throw new Error(`source ${sourceId} does not return ${url} for any of ${tried.length} query forms`);
 }

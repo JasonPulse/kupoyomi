@@ -1,5 +1,5 @@
 import { db } from "./db.js";
-import { compare } from "./match.js";
+import { compare, resolveManga } from "./match.js";
 import { canonical } from "./seed.js";
 import type { Candidate } from "./match.js";
 
@@ -49,7 +49,10 @@ export async function listCandidates(opts: { id?: number } = {}): Promise<void> 
     for (const c of r.candidates) {
       let cmp;
       try {
-        cmp = await compare(c.mangaId);
+        // Stored manga ids are row ids from the Suwayomi that ran the search. Resolve
+        // the stable (source, url) pair against whichever instance is answering now.
+        const localId = c.url ? await resolveManga(c.sourceId, c.title, c.url) : c.mangaId;
+        cmp = await compare(localId);
       } catch (err) {
         const note = err instanceof Error ? err.message : String(err);
         await cache(r.id, c, 0, null, null, 0, [], note);

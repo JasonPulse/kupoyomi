@@ -28,6 +28,8 @@ a{color:#6ab}
 type CandRow = {
   id: number; folder: string; dead_source: string | null; file_count: number; resolved_title: string | null;
   held_count: number | null; held_lo: string | null; held_hi: string | null;
+  /** Publication status the old library recorded, where it knew one. */
+  status: string | null;
 };
 type CmpRow = {
   candidate_id: number; manga_id: number; source_name: string; source_url: string | null; chapters: number;
@@ -40,8 +42,11 @@ type CmpRow = {
 export async function reviewPage(): Promise<string> {
   const p = db();
   const cands = (await p.query<CandRow>(
-    `SELECT id, folder, dead_source, file_count, resolved_title, held_count, held_lo, held_hi
-       FROM import_candidate WHERE confirmed_series_id IS NULL ORDER BY file_count DESC`)).rows;
+    `SELECT ic.id, ic.folder, ic.dead_source, ic.file_count, ic.resolved_title,
+            ic.held_count, ic.held_lo, ic.held_hi, lm.status
+       FROM import_candidate ic
+       LEFT JOIN legacy_manga lm ON lm.suwayomi_id = ic.suwayomi_manga_id
+      WHERE ic.confirmed_series_id IS NULL ORDER BY ic.file_count DESC`)).rows;
   // A source with no chapters is noise: DMCA'd entries keep the title and lose the
   // content, so they match on name and are worthless as a home.
   const cmps = (await p.query<CmpRow>(
@@ -59,7 +64,32 @@ export async function reviewPage(): Promise<string> {
     if (l) l.push(c); else byCand.set(c.candidate_id, [c]);
   }
 
-  const cards = cands.map((k) => {
+  // A series the old library recorded as finished has nothing to migrate to: there
+  // will be no further chapters, so every candidate can only be a fragment of what
+  // is already held. Those belong in their own list, not in a migration decision.
+  const finished = (s: string | null): boolean =>
+    s === "COMPLETED" || s === "PUBLISHING_FINISHED" || s === "CANCELLED";
+  const finishedCands = cands.filter((k) => finished(k.status));
+  const openCands = cands.filter((k) => !finished(k.status));
+
+  const archiveButton = (id: number, label: string): string =>
+    `<form method="post" action="/archive" style="display:inline">
+       <input type="hidden" name="id" value="${id}">
+       <button class="weak" type="submit">${label}</button></form>`;
+
+  const finishedCards = finishedCands.length === 0 ? "" : `<div class="card">
+    <div class="title">Finished publishing &mdash; nothing to migrate to</div>
+    <div class="meta">The old library recorded these as complete. Archiving keeps every file and
+      stops them being searched, migrated or stall-alerted.</div>
+    <table><tr><th>series</th><th>you hold</th><th>status</th><th></th></tr>
+    ${finishedCands.map((k) => `<tr>
+      <td>${esc(k.resolved_title ?? k.folder)}</td>
+      <td class="dim">${k.held_count ?? k.file_count} chapters, ${fmt(k.held_lo)}&ndash;${fmt(k.held_hi)}</td>
+      <td class="dim">${esc(k.status ?? "-")}</td>
+      <td>${archiveButton(k.id, "archive")}</td></tr>`).join("")}
+    </table></div>`;
+
+  const cards = finishedCards + openCands.map((k) => {
     const opts = byCand.get(k.id) ?? [];
     const title = k.resolved_title ?? k.folder;
     const yours = k.held_count
@@ -70,7 +100,14 @@ export async function reviewPage(): Promise<string> {
     // the point; losing chapters you already own is the thing to avoid.
     // The reason to migrate is new releases past where you are. Filling holes is a
     // bonus; a source not carrying old chapters costs nothing, since the files stay.
-    const best = [...opts].sort((a, b) =>
+    // A source has to be able to serve the series, not just share its name. One
+    // carrying a handful of chapters against hundreds held is a fragment: it would
+    // become the binding for a run it does not have, so it is shown for information
+    // and cannot be chosen.
+    const heldCount = k.held_count ?? k.file_count;
+    const viable = (o: CmpRow): boolean => o.chapters >= Math.max(1, heldCount * 0.5);
+    const usable = opts.filter(viable);
+    const best = [...usable].sort((a, b) =>
       (b.new_beyond ?? 0) - (a.new_beyond ?? 0) ||
       (b.fills_gaps ?? 0) - (a.fills_gaps ?? 0) ||
       (a.not_carried ?? 0) - (b.not_carried ?? 0))[0];
@@ -82,9 +119,13 @@ export async function reviewPage(): Promise<string> {
 
     const rows = opts.length === 0
       ? `<tr><td colspan="7" class="dim">no live source carries this &mdash; needs a wider search</td></tr>`
+      : usable.length === 0
+      ? `<tr><td colspan="7" class="dim">every match is a fragment of what you already hold &mdash;
+           either it is finished, or it needs a wider search</td></tr>`
       : opts.map((o) => {
           const beyond = o.new_beyond ?? 0, fills = o.fills_gaps ?? 0, absent = o.not_carried ?? 0;
-          const good = beyond > 0;
+          const ok = viable(o);
+          const good = ok && beyond > 0;
           const slug = dupNames.has(o.source_name) && o.source_url
             ? `<div class="dim" style="font-size:11px">${esc(o.source_url.slice(0, 44))}</div>` : "";
           const groups = [...new Set((o.latest ?? []).map((l) => l.scanlator).filter(Boolean))].join(", ");
@@ -96,21 +137,17 @@ export async function reviewPage(): Promise<string> {
             <td class="dim">${absent > 0 ? absent : "-"}</td>
             <td class="dim">${o.last_upload ? esc(String(o.last_upload).slice(0, 10)) : "-"}${
               groups ? `<div class="latest">${esc(groups.slice(0, 40))}</div>` : ""}</td>
-            <td><form method="post" action="/confirm">
+            <td>${ok ? `<form method="post" action="/confirm">
               <input type="hidden" name="id" value="${k.id}">
               <input type="hidden" name="pick" value="${o.manga_id}">
               <button class="${good ? "" : "weak"}" type="submit">use this</button>
-            </form></td></tr>`;
+            </form>` : `<span class="dim" title="carries ${o.chapters} of your ${heldCount} chapters">fragment</span>`}</td></tr>`;
         }).join("");
 
     return `<div class="card">
       <div class="title">${esc(title)}</div>
       <div class="meta">${yours} &middot; stranded under ${esc(k.dead_source ?? "-")}
-        <form method="post" action="/archive" style="display:inline;margin-left:10px">
-          <input type="hidden" name="id" value="${k.id}">
-          <button class="weak" type="submit" title="Finished series: keep the files, bind no source, stop asking">
-            finished &mdash; no migration needed</button>
-        </form></div>
+        <span style="margin-left:10px">${archiveButton(k.id, "finished &mdash; no migration needed")}</span></div>
       <table><tr><th>source</th><th>their range</th>
         <th title="chapters past your highest">new releases</th>
         <th title="holes inside your range this source could fill">fills gaps</th>
@@ -122,7 +159,7 @@ export async function reviewPage(): Promise<string> {
   return `<!doctype html><html><head><meta charset="utf-8"><title>Kupoyomi review</title>
     <meta name="viewport" content="width=device-width,initial-scale=1"><style>${CSS}</style></head><body>
     <header><h1>Kupoyomi &mdash; migration review</h1>
-      <div class="sub">${cands.length} awaiting a decision &middot; ${done?.n ?? 0} confirmed &middot;
+      <div class="sub">${openCands.length} awaiting a decision &middot; ${finishedCands.length} look finished &middot; ${done?.n ?? 0} confirmed &middot;
       ledger ${led?.s ?? 0} series / ${led?.c ?? 0} chapters</div></header>
     <main>${cards || "<p class=dim>nothing awaiting confirmation.</p>"}</main></body></html>`;
 }

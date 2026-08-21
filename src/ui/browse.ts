@@ -175,7 +175,7 @@ export async function streamBrowse(res: ServerResponse, sourceId: string, type: 
          fetchSourceManga(input:{source:$s,type:$t,page:1,filters:$f}){ hasNextPage mangas{ id title url thumbnailUrl } } }`,
       { s: sourceId, t: kind, f: parsed });
     for (const m of r.fetchSourceManga.mangas) {
-      send("hit", { sourceId, sourceName: src.displayName, mangaId: m.id, title: m.title, url: m.url, thumb: m.thumbnailUrl });
+      send("hit", { sourceId, sourceName: src.displayName, mangaId: m.id, title: m.title, url: m.url, thumb: `/thumb/${m.id}` });
     }
   } catch (err) {
     send("error", { message: err instanceof Error ? err.message : String(err) });

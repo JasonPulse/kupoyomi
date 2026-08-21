@@ -128,6 +128,24 @@ export async function serve(): Promise<void> {
     const redirect = (to: string): void => { res.writeHead(303, { location: to }); res.end(); };
 
     if (path === "/healthz") return send(200, { ok: true });
+
+    // Covers are served by Suwayomi, whose paths mean nothing to a browser pointed at
+    // us, so they are proxied. Cached hard: a cover for a given manga does not change.
+    const th = /^\/thumb\/(\d+)$/.exec(path);
+    if (th) {
+      const base = (process.env["SUWAYOMI_URL"] ?? "").replace(/\/api\/graphql\/?$/, "");
+      fetch(`${base}/api/v1/manga/${th[1]}/thumbnail`)
+        .then(async (r) => {
+          if (!r.ok) { res.writeHead(r.status); res.end(); return; }
+          res.writeHead(200, {
+            "content-type": r.headers.get("content-type") ?? "image/jpeg",
+            "cache-control": "public, max-age=604800, immutable",
+          });
+          res.end(Buffer.from(await r.arrayBuffer()));
+        })
+        .catch(() => { res.writeHead(502); res.end(); });
+      return;
+    }
     if (path === "/api/stats") {
       stats().then((s) => send(200, s)).catch((e: unknown) =>
         send(503, { error: e instanceof Error ? e.message : String(e) }));

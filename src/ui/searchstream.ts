@@ -37,7 +37,7 @@ export async function streamSearch(res: ServerResponse, query: string, concurren
         for (const m of r.fetchSourceManga.mangas.slice(0, 8)) {
           send("hit", {
             sourceId: src.id, sourceName: src.displayName, nsfw: src.isNsfw,
-            mangaId: m.id, title: m.title, url: m.url, thumb: m.thumbnailUrl,
+            mangaId: m.id, title: m.title, url: m.url, thumb: `/thumb/${m.id}`,
           });
         }
       } catch { /* one dead source must not spoil the search */ }

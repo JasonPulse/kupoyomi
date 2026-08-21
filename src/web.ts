@@ -19,6 +19,9 @@ table{border-collapse:collapse;width:100%;font-size:13px}
 th{text-align:left;color:#888;font-weight:500;padding:4px 8px;border-bottom:1px solid #333}
 td{padding:5px 8px;border-bottom:1px solid #242424;vertical-align:top}
 .rec{color:#7ec699}.bad{color:#c98b7e}.dim{color:#777}
+.badge{display:inline-block;font-size:11px;padding:1px 7px;border-radius:9px;background:#232;color:#9b9;border:1px solid #343}
+.actions{margin-top:10px;padding-top:9px;border-top:1px solid #262626;display:flex;gap:8px;align-items:center}
+.actions .hint{color:#666;font-size:11px}
 button{background:#2b6;border:0;color:#062;font-weight:600;padding:4px 10px;border-radius:4px;cursor:pointer}
 button.weak{background:#444;color:#bbb}
 .latest{color:#777;font-size:11px;white-space:pre-line}
@@ -77,8 +80,14 @@ export async function reviewPage(): Promise<string> {
        <input type="hidden" name="id" value="${id}">
        <button class="weak" type="submit">${label}</button></form>`;
 
+  // Only what the old library actually recorded. Anything else says so, rather than
+  // leaving an action button looking like a verdict.
+  const statusBadge = (st: string | null): string =>
+    st && st !== "UNKNOWN" ? `<span class="badge">${esc(st.toLowerCase().replace(/_/g, " "))}</span>`
+                           : `<span class="badge" style="color:#777">status unknown</span>`;
+
   const finishedCards = finishedCands.length === 0 ? "" : `<div class="card">
-    <div class="title">Finished publishing &mdash; nothing to migrate to</div>
+    <div class="title">Recorded as finished by the old library</div>
     <div class="meta">The old library recorded these as complete. Archiving keeps every file and
       stops them being searched, migrated or stall-alerted.</div>
     <table><tr><th>series</th><th>you hold</th><th>status</th><th></th></tr>
@@ -145,15 +154,17 @@ export async function reviewPage(): Promise<string> {
         }).join("");
 
     return `<div class="card">
-      <div class="title">${esc(title)}</div>
-      <div class="meta">${yours} &middot; stranded under ${esc(k.dead_source ?? "-")}
-        <span style="margin-left:10px">${archiveButton(k.id, "finished &mdash; no migration needed")}</span></div>
+      <div class="title">${esc(title)} ${statusBadge(k.status)}</div>
+      <div class="meta">${yours} &middot; stranded under ${esc(k.dead_source ?? "-")}</div>
       <table><tr><th>source</th><th>their range</th>
         <th title="chapters past your highest">new releases</th>
         <th title="holes inside your range this source could fill">fills gaps</th>
         <th title="chapters you hold that this source does not carry -- you keep the files either way">not carried</th>
         <th>last upload</th><th></th></tr>
-      ${rows}</table></div>`;
+      ${rows}</table>
+      <div class="actions">${archiveButton(k.id, "mark as finished")}
+        <span class="hint">no more chapters coming: keep every file, bind no source, stop asking</span>
+      </div></div>`;
   }).join("");
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>Kupoyomi review</title>

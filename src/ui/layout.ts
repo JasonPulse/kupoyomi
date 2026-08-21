@@ -16,19 +16,22 @@ nav a.on{color:#2b2318;font-weight:700;padding:0 6px 0 4px;background:none;
   border-style:solid;border-width:0 20px 0 32px;
   border-image:url(/tab-on.png) 0 20 0 32 fill stretch}
 .sub{color:#888;font-size:12px;margin-left:auto;padding-bottom:6px}
-main{padding:18px 20px;max-width:1200px}
+main{padding:18px 20px 40px;max-width:1240px;margin:0 auto}
 
 /* Every panel is an FFXI news window: caps top and bottom as pseudo-elements so no
    markup changes, with the middle tiling vertically. One visual language throughout,
    rather than parchment on some pages and dark cards on others. */
 .card,.tile{position:relative;background:url(/newsmiddle.png) repeat-y center top;background-size:100% auto;
-  color:#2a241c;padding:12px 26px;margin-bottom:16px}
+  color:#2a241c;margin:0 0 16px}
+/* Caps live inside the box. Hung outside they overlapped whatever came next and got
+   clipped, which is why bottoms went missing. */
 .card::before,.tile::before,.card::after,.tile::after{content:"";position:absolute;left:0;right:0;height:27px;
-  background:url(/newstop.png) no-repeat center top;background-size:100% 100%}
-.card::before,.tile::before{top:-25px}
-.card::after,.tile::after{bottom:-25px;background-image:url(/newsbottom.png)}
-.card{margin-top:26px}
-.tile{margin:26px 0 16px;padding:10px 18px}
+  background:url(/newstop.png) no-repeat center top;background-size:100% 100%;pointer-events:none}
+.card::before,.tile::before{top:0}
+.card::after,.tile::after{bottom:0;background-image:url(/newsbottom.png)}
+/* Padding clears the caps so content never sits under the ornament. */
+.card{padding:34px 30px}
+.tile{padding:30px 22px;margin-bottom:0}
 
 /* Dark ink on parchment, since the panels are now light. */
 .title{font-weight:700;margin-bottom:2px;color:#2b2318}
@@ -55,7 +58,8 @@ a.series{color:#4a3a7a;text-decoration:none}a.series:hover{text-decoration:under
 .bar{height:5px;background:rgba(0,0,0,.16);border-radius:3px;overflow:hidden;min-width:70px}
 .bar > i{display:block;height:100%;background:#6b4fa0}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
-.grid .tile{margin:26px 0 4px}
+.grid{align-items:stretch}
+.grid .tile{display:flex;flex-direction:column;justify-content:center}
 
 /* Cover art stays dark inside the parchment, so it reads as art laid on paper. */
 .lc,.bt{background:#1d1d22;border:1px solid #3a3a44;box-shadow:0 1px 5px rgba(0,0,0,.35)}

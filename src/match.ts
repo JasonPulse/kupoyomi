@@ -85,8 +85,15 @@ export async function findHomes(opts: { only?: string; limit?: number; includeNs
   return { resolved, review };
 }
 
-/** Chapter count, gaps and the last few uploads per candidate: the migration comparison view. */
+/**
+ * Chapter count, gaps and the last few uploads per candidate: the migration
+ * comparison view. A search result has a manga row but no chapter list, so this
+ * primes it from the source first -- comparing candidates means asking the sources,
+ * there is no way around the round trip.
+ */
 export async function compare(mangaId: number) {
+  await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
+    { id: mangaId });
   const d = await gql<{ manga: { title: string; source: { displayName: string } | null;
     chapters: { totalCount: number; nodes: Array<{ chapterNumber: number | null; uploadDate: string | null; scanlator: string | null }> } } }>(
     `{ manga(id:${mangaId}){ title source{displayName} chapters{ totalCount nodes{ chapterNumber uploadDate scanlator } } } }`);

@@ -9,6 +9,7 @@ import { archiveCandidate } from "./archive.js";
 import { backfillUrls } from "./backfill.js";
 import { relayout } from "./relayout.js";
 import { prune } from "./prune.js";
+import { probe } from "./probe.js";
 import { parseCheck } from "./parsecheck.js";
 import { serve } from "./server.js";
 
@@ -27,6 +28,7 @@ const usage = `kupoyomi <command>
   archive <id> [--dry-run]   file a finished series: adopt its files, bind no source
   relayout [seriesId] [--dry-run] move chapters into the canonical tree
   prune [--dry-run]          drop ledger rows whose file is gone
+  probe [--batch N] [--max M] install extensions in batches to find unhoused series
   parse-check                how well chapter numbers can be read from filenames
   serve                      http api + extension bootstrap (long running)
 
@@ -100,6 +102,15 @@ const main = async (): Promise<void> => {
     case "parse-check":
       await parseCheck();
       break;
+    case "probe": {
+      const b = flag("batch"), m = flag("max");
+      await probe({
+        ...(b !== undefined ? { batch: Number(b) } : {}),
+        ...(m !== undefined ? { max: Number(m) } : {}),
+      });
+      await closeDb();
+      break;
+    }
     case "prune":
       await prune({ dryRun: process.argv.includes("--dry-run") });
       await closeDb();

@@ -1,5 +1,5 @@
 import { db } from "../db.js";
-import { esc, page } from "./layout.js";
+import { esc, page, news } from "./layout.js";
 import { fmt } from "../held.js";
 
 export type Live = {
@@ -50,25 +50,11 @@ export async function liveState(): Promise<Live> {
  * ends. Deliberately light against the dark app, because that is what the images are.
  */
 const FRAME = `
-.news{background:url(/newsmiddle.png) repeat-y center top;background-size:100% auto;
-  color:#2a241c;padding:2px 0;margin-bottom:16px}
-.news .cap{height:27px;background:url(/newstop.png) no-repeat center top;background-size:100% 100%}
-.news .cap.b{background-image:url(/newsbottom.png)}
-.news .inner{padding:4px 26px 10px}
-.news h2{font-size:14px;margin:0 0 8px;display:flex;align-items:center;gap:8px;
-  font-weight:700;letter-spacing:.02em;color:#3a3025}
-.news table{color:#2a241c}
-.news th{color:#6b5f4c;border-bottom:1px solid rgba(0,0,0,.18)}
-.news td{border-bottom:1px solid rgba(0,0,0,.08)}
-.news tr:hover td{background:rgba(0,0,0,.04)}
-.news .hdr{height:22px;background:url(/newsheader.png) no-repeat left center;background-size:contain}
 .pbar{height:6px;background:rgba(0,0,0,.15);border-radius:3px;overflow:hidden;min-width:90px}
 .pbar > i{display:block;height:100%;background:#6b4fa0}
 .tile-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:14px}
 `;
 
-const newsPanel = (title: string, inner: string): string =>
-  `<div class="news"><div class="cap"></div><div class="inner"><h2>${title}</h2>${inner}</div><div class="cap b"></div></div>`;
 
 export async function downloadsPage(): Promise<string> {
   const s = await liveState();
@@ -82,8 +68,8 @@ export async function downloadsPage(): Promise<string> {
        <div class="tile"><div class="n">done, last day</div><b style="font-size:20px" id="t-day">${s.rate.lastDay}</b></div>
        <div class="tile"><div class="n">given up</div><b style="font-size:20px" id="t-stuck">${s.stuck.length}</b></div>
      </div>
-     ${newsPanel("Downloading now", '<div id="active"></div>')}
-     ${newsPanel("Just finished", '<div id="recent"></div>')}
+     ${news("Downloading now", '<div id="active"></div>')}
+     ${news("Just finished", '<div id="recent"></div>')}
      <div class="card"><div class="title">Given up after 4 attempts</div><div id="stuck"></div></div>
      <script>
      function rel(s){ return s<60 ? s+'s ago' : s<3600 ? Math.round(s/60)+'m ago' : Math.round(s/3600)+'h ago'; }

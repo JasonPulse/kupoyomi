@@ -12,6 +12,7 @@ import { prune } from "./prune.js";
 import { probe, tidyExtensions } from "./probe.js";
 import { scanWanted, fetchWanted } from "./fetch.js";
 import { checkStalled } from "./schedule.js";
+import { refreshAllMetadata } from "./metadata.js";
 import { parseCheck } from "./parsecheck.js";
 import { serve } from "./server.js";
 
@@ -35,6 +36,7 @@ const usage = `kupoyomi <command>
   scan [seriesId]            queue chapters the bound source has and we do not
   fetch [--limit N]          download queued chapters
   stalled                    flag series whose source has gone quiet
+  metadata [--force]         fetch covers and synopses for series missing them
   parse-check                how well chapter numbers can be read from filenames
   serve                      http api + extension bootstrap (long running)
 
@@ -124,6 +126,13 @@ const main = async (): Promise<void> => {
       await closeDb();
       break;
     }
+    case "metadata":
+      await refreshAllMetadata({
+        force: process.argv.includes("--force"),
+        ...(flag("limit") !== undefined ? { limit: Number(flag("limit")) } : {}),
+      });
+      await closeDb();
+      break;
     case "stalled": {
       const n = await checkStalled();
       console.log(`newly flagged: ${n}`);

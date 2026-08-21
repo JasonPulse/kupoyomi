@@ -164,7 +164,7 @@ export async function serve(): Promise<void> {
     }
 
     if (req.method === "GET") {
-      if (path === "/") return html(libraryPage(url.searchParams.get("q") ?? undefined));
+      if (path === "/") return html(libraryPage(url.searchParams.get("q") ?? undefined, url.searchParams.get("view") ?? "grid"));
       if (path === "/search") return html(searchPage(url.searchParams.get("q") ?? undefined));
       if (path === "/api/search") {
         streamSearch(res, url.searchParams.get("q") ?? "").catch(() => res.end());

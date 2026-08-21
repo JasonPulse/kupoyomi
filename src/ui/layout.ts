@@ -41,11 +41,32 @@ a.series{color:#cde;text-decoration:none}a.series:hover{text-decoration:underlin
 .bar{height:5px;background:#2a2a2a;border-radius:3px;overflow:hidden;min-width:70px}
 .bar > i{display:block;height:100%;background:#2b6}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+/* The FFXI news window: caps top and bottom with the middle tiling vertically, which is
+   exactly how the art was drawn. Deliberately parchment against the dark app. */
+.news{background:url(/newsmiddle.png) repeat-y center top;background-size:100% auto;
+  color:#2a241c;padding:2px 0;margin-bottom:16px}
+.news .cap{height:27px;background:url(/newstop.png) no-repeat center top;background-size:100% 100%}
+.news .cap.b{background-image:url(/newsbottom.png)}
+.news .inner{padding:4px 26px 12px}
+.news h2{font-size:14px;margin:0 0 9px;font-weight:700;letter-spacing:.02em;color:#3a3025}
+.news table{color:#2a241c}
+.news th{color:#6b5f4c;border-bottom:1px solid rgba(0,0,0,.18)}
+.news td{border-bottom:1px solid rgba(0,0,0,.08)}
+.news tr:hover td{background:rgba(0,0,0,.05)}
+.news a{color:#4a3a7a}
+.news .dim{color:#6b5f4c}
+.news .bar{background:rgba(0,0,0,.15)}
+.news .bar > i{background:#6b4fa0}
 .tile{background:#1a1a1a;border:1px solid #2e2e2e;border-radius:6px;padding:11px}
 .tile .n{font-size:12px;color:#888}
 `;
 
 export type Nav = "library" | "browse" | "search" | "review" | "queue" | "downloads" | "extensions";
+
+/** A parchment panel, for the primary content of a page. */
+export const news = (title: string, inner: string): string =>
+  `<div class="news"><div class="cap"></div><div class="inner">${
+    title ? `<h2>${title}</h2>` : ""}${inner}</div><div class="cap b"></div></div>`;
 
 export function page(active: Nav, subtitle: string, body: string): string {
   const link = (id: Nav, href: string, label: string): string =>

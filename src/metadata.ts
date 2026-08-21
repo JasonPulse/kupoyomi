@@ -54,3 +54,31 @@ export async function refreshMetadata(seriesId: number): Promise<{ cover: boolea
     [seriesId, d.description, coverPath, d.status]);
   return { cover: coverPath !== null, description: !!d.description };
 }
+
+
+/**
+ * Fills in covers and synopses for series that have none. Paced, because each one is a
+ * search plus a fetch against a real site, and there is no hurry.
+ */
+export async function refreshAllMetadata(opts: { force?: boolean; limit?: number } = {}): Promise<void> {
+  const p = db();
+  const rows = (await p.query<{ id: number; title: string }>(
+    `SELECT s.id, s.title FROM series s
+      WHERE ${opts.force ? "TRUE" : "(s.cover_path IS NULL OR s.description IS NULL)"}
+        AND EXISTS (SELECT 1 FROM series_binding b WHERE b.series_id = s.id AND b.role = 'primary')
+      ORDER BY s.title ${opts.limit ? `LIMIT ${Number(opts.limit)}` : ""}`)).rows;
+  console.log(`${rows.length} series need metadata`);
+  let cover = 0, desc = 0, failed = 0;
+  for (const r of rows) {
+    try {
+      const got = await refreshMetadata(r.id);
+      if (got.cover) cover++;
+      if (got.description) desc++;
+      console.log(`  ${got.cover ? "cover" : "     "} ${got.description ? "text" : "    "}  ${r.title.slice(0, 52)}`);
+    } catch (err) {
+      failed++;
+      console.log(`  ERR  ${r.title.slice(0, 40)}: ${err instanceof Error ? err.message.slice(0, 60) : String(err)}`);
+    }
+  }
+  console.log(`covers ${cover}, synopses ${desc}, failed ${failed}`);
+}

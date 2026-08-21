@@ -1,5 +1,5 @@
 import { db } from "../db.js";
-import { esc, page } from "./layout.js";
+import { esc, page, news } from "./layout.js";
 import { fmt } from "../held.js";
 
 export async function queuePage(): Promise<string> {
@@ -26,9 +26,7 @@ export async function queuePage(): Promise<string> {
     `${stuck.length > 0 ? `<div class="card"><div class="title bad">${stuck.length} chapters have given up after 4 attempts</div>
        <div class="meta">These are not retried automatically. Usually the source stopped carrying the chapter,
        or its numbering changed.</div></div>` : ""}
-     <div class="card">
-       <table><tr><th>series</th><th>chapter</th><th>state</th><th>last error</th></tr>
+     ${news("Queue", `<table><tr><th>series</th><th>chapter</th><th>state</th><th>last error</th></tr>
        ${body || '<tr><td colspan="4" class="dim">nothing queued</td></tr>'}</table>
-       ${rows.length >= 500 ? '<div class="dim" style="margin-top:8px">showing the first 500</div>' : ""}
-     </div>`);
+       ${rows.length >= 500 ? '<div class="dim" style="margin-top:8px">showing the first 500</div>' : ""}`)}`);
 }

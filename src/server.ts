@@ -10,10 +10,11 @@ import { seriesPage } from "./ui/series.js";
 import { queuePage } from "./ui/queue.js";
 import { downloadsPage, liveState } from "./ui/downloads.js";
 import { browseIndex, browseSource, streamBrowse } from "./ui/browse.js";
+import { previewPage } from "./ui/preview.js";
 import { extensionsPage, setExtension } from "./ui/extensions.js";
 import { ASSETS } from "./ui/assets.js";
 import { refreshMetadata } from "./metadata.js";
-import { listSeries, getSeries, getChapters, getPages, getPage, setProgress } from "./pbapi.js";
+import { listSeries, getSeries, getChapters, getPages, getPage, setProgress, bindingAvailability } from "./pbapi.js";
 import { createReadStream } from "node:fs";
 import { scanWanted } from "./fetch.js";
 import { startScheduler, state as schedState, checkStalled } from "./schedule.js";
@@ -238,6 +239,10 @@ export async function serve(): Promise<void> {
         return;
       }
       if (path === "/browse") return html(browseIndex());
+      if (path === "/preview") {
+        return html(previewPage(url.searchParams.get("source") ?? "",
+          url.searchParams.get("url") ?? "", url.searchParams.get("title") ?? ""));
+      }
       if (path === "/extensions") {
         return html(extensionsPage({
           ...(url.searchParams.get("q") ? { q: url.searchParams.get("q")! } : {}),
@@ -254,6 +259,12 @@ export async function serve(): Promise<void> {
       if (b) {
         return html(browseSource(decodeURIComponent(b[1]!),
           url.searchParams.get("type") ?? "POPULAR", url.searchParams.getAll("f")));
+      }
+      const bav = /^\/api\/binding\/(\d+)$/.exec(path);
+      if (bav) {
+        bindingAvailability(Number(bav[1])).then((d) => send(200, d))
+          .catch((e: unknown) => send(200, { error: e instanceof Error ? e.message : String(e) }));
+        return;
       }
       const cover = /^\/series\/(\d+)\/cover$/.exec(path);
       if (cover) {
@@ -293,6 +304,15 @@ export async function serve(): Promise<void> {
         if (path === "/extensions/install" || path === "/extensions/uninstall") {
           await setExtension(form.get("pkg") ?? "", path.endsWith("install"));
           return "/extensions";
+        }
+        const promote = /^\/series\/(\d+)\/promote$/.exec(path);
+        if (promote) {
+          const bid = Number(form.get("binding"));
+          const sid = Number(promote[1]);
+          // Exactly one primary is a database constraint, so the incumbent steps down first.
+          await db().query("UPDATE series_binding SET role='supplemental' WHERE series_id=$1 AND role='primary'", [sid]);
+          await db().query("UPDATE series_binding SET role='primary' WHERE id=$1 AND series_id=$2", [bid, sid]);
+          return `/series/${sid}`;
         }
         const meta = /^\/series\/(\d+)\/metadata$/.exec(path);
         if (meta) { await refreshMetadata(Number(meta[1])); return `/series/${meta[1]}`; }

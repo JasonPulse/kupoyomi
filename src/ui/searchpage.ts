@@ -56,9 +56,11 @@ function render(g) {
         '<td class="dim">'+(r.variant || '-')+'</td>' +
         '<td class="'+(empty?'bad':thin?'warn':known?'rec':'dim')+'">'+(known ? r.chapters : '<span class="spin">checking</span>')+'</td>' +
         '<td class="dim">'+(r.lastUpload || '-')+'</td>' +
-        '<td class="act">' + (empty
+        '<td class="act"><a class="series" style="margin-right:8px;font-size:11px" href="/preview?source='+
+          encodeURIComponent(r.sourceId)+'&url='+encodeURIComponent(r.url)+'&title='+encodeURIComponent(r.title)+
+          '">details</a>' + (empty
           ? '<span class="dim" title="this source lists the series but carries no chapters">empty</span>'
-          : '<form method="post" action="/add">' +
+          : '<form class="addf" method="post" action="/add">' +
             '<input type="hidden" name="title" value="'+r.title.replace(/"/g,'&quot;')+'">' +
             '<input type="hidden" name="sourceId" value="'+r.sourceId+'">' +
             '<input type="hidden" name="sourceName" value="'+r.sourceName.replace(/"/g,'&quot;')+'">' +

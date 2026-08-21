@@ -26,9 +26,17 @@ export async function seriesPage(id: number): Promise<string> {
     for (let i = Math.min(...whole); i <= Math.max(...whole); i++) if (!whole.has(i)) gaps.push(i);
   }
 
-  const bindRows = bindings.map((b) => `<tr>
+  // Availability is fetched per binding from the page, since each answer is a live
+  // request to a site and four sources should not make the page wait for four.
+  const bindRows = bindings.map((b) => `<tr data-binding="${b.id}">
     <td>${esc(b.source_name)} ${b.role === "primary" ? '<span class="badge">primary</span>' : '<span class="dim">supplemental</span>'}</td>
-    <td class="dim" style="font-size:11px">${esc((b.source_url ?? "-").slice(0, 60))}</td></tr>`).join("");
+    <td class="av dim">checking</td>
+    <td class="rng dim">-</td>
+    <td class="nb dim">-</td>
+    <td class="nc dim">-</td>
+    <td>${b.role === "primary" ? "" : `<form method="post" action="/series/${id}/promote" style="display:inline">
+      <input type="hidden" name="binding" value="${b.id}">
+      <button class="weak" type="submit">make primary</button></form>`}</td></tr>`).join("");
 
   const wantRows = wanted.length === 0
     ? '<tr><td colspan="3" class="dim">nothing queued</td></tr>'
@@ -60,7 +68,13 @@ export async function seriesPage(id: number): Promise<string> {
          s.stalled_since ? ' &middot; <span class="warn">gone quiet</span>' : ""}</div>
        ${s.description ? `<div class="syn">${esc(s.description.slice(0, 1400))}</div>` : '<div class="syn dim">no synopsis yet</div>'}
        </div></div>
-       <table style="margin-top:12px"><tr><th>binding</th><th>url</th></tr>${bindRows || '<tr><td colspan="2" class="bad">no source bound</td></tr>'}</table>
+       <table style="margin-top:12px" id="bindings">
+         <tr><th>source</th><th>chapters</th><th>range</th>
+             <th title="chapters past what you hold">new</th>
+             <th title="chapters you hold that this source does not carry -- you keep the files">not carried</th><th></th></tr>
+         ${bindRows || '<tr><td colspan="6" class="bad">no source bound</td></tr>'}</table>
+       <div class="actions"><a class="series" href="/search?q=${encodeURIComponent(s.title)}">find another source for this series</a>
+         <span class="hint">adding one from search attaches it here instead of creating a second series</span></div>
        <div class="actions">
          <form method="post" action="/series/${id}/scan"><button class="weak" type="submit">check for new chapters</button></form>
          <form method="post" action="/series/${id}/mute"><button class="weak" type="submit">${s.muted ? "unmute" : "mute"}</button></form>
@@ -70,6 +84,20 @@ export async function seriesPage(id: number): Promise<string> {
      </div>
      <div class="card"><div class="title">Queue</div>
        <table><tr><th>chapter</th><th>state</th><th>last error</th></tr>${wantRows}</table></div>
+     <script>
+     document.querySelectorAll('#bindings tr[data-binding]').forEach(tr => {
+       fetch('/api/binding/' + tr.dataset.binding).then(r => r.json()).then(d => {
+         if (d.error) { tr.querySelector('.av').innerHTML = '<span class="bad">unreachable</span>';
+           tr.querySelector('.av').title = d.error; return; }
+         tr.querySelector('.av').textContent = d.chapters;
+         tr.querySelector('.rng').textContent = (d.lo ?? '-') + '-' + (d.hi ?? '-') + (d.gaps ? ' (' + d.gaps + ' gaps)' : '');
+         const nb = tr.querySelector('.nb');
+         nb.textContent = d.newBeyond > 0 ? '+' + d.newBeyond : '0';
+         nb.className = 'nb ' + (d.newBeyond > 0 ? 'rec' : 'dim');
+         tr.querySelector('.nc').textContent = d.notCarried || '-';
+       }).catch(() => { tr.querySelector('.av').textContent = '?'; });
+     });
+     </script>
      <div class="card"><div class="title">Chapters</div>
        <table><tr><th>chapter</th><th>pages</th><th>group</th><th>uploaded</th></tr>${chapRows}</table>
        ${chapters.length > 400 ? `<div class="dim" style="margin-top:8px">showing the newest 400 of ${chapters.length}</div>` : ""}

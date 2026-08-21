@@ -1,5 +1,6 @@
-import { buildInventory } from "./inventory.js";
-import { gql, installedSources, libraryWithChapters, allManga, sanitize } from "./suwayomi.js";
+import { db } from "./db.js";
+import { scanLegacyTree } from "./disk.js";
+import { gql, installedSources, sanitize } from "./suwayomi.js";
 
 export type Candidate = { sourceName: string; sourceId: string; mangaId: number; title: string; matched: "title" | "sanitized" };
 export type Stranded = {
@@ -17,14 +18,15 @@ const SEARCH = `mutation($src:LongString!,$q:String!){
   fetchSourceManga(input:{source:$src,type:SEARCH,query:$q,page:1}){ mangas{ id title } } }`;
 
 export async function findHomes(opts: { only?: string; limit?: number; includeNsfw?: boolean } = {}) {
-  const [inv, sources, everything] = await Promise.all([
-    buildInventory(), installedSources(), allManga(),
-  ]);
+  const [disk, sources] = await Promise.all([scanLegacyTree(), installedSources()]);
   const live = new Set(sources.map((s) => s.displayName));
-  const downloaded = everything.filter((m) => m.downloadCount > 0);
+  // Real titles come from the snapshot, not from Suwayomi: the running instance is
+  // stateless by design and knows nothing about the old library.
+  const downloaded = (await db().query<{ id: number; title: string }>(
+    "SELECT suwayomi_id AS id, title FROM legacy_manga WHERE download_count > 0")).rows;
 
   let stranded: Stranded[] = [];
-  for (const d of inv.disk) {
+  for (const d of disk) {
     if (!d.sourceDir || live.has(d.sourceDir) || d.cbzCount === 0) continue;
     const row = downloaded.find((m) => sanitize(m.title) === d.folder);
     stranded.push({

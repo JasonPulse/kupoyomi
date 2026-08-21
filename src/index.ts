@@ -3,6 +3,7 @@ import { findHomes, compare } from "./match.js";
 import { migrate, stageCandidates, closeDb } from "./db.js";
 import { snapshot } from "./snapshot.js";
 import { seedLedger } from "./seed.js";
+import { listCandidates, confirmCandidate } from "./confirm.js";
 import { serve } from "./server.js";
 
 const usage = `kupoyomi <command>
@@ -14,6 +15,8 @@ const usage = `kupoyomi <command>
   import [--limit N]         find homes and stage them for confirmation
   snapshot                   freeze the old Suwayomi's state before it is torn down
   seed                       build the ledger from the snapshot
+  candidates [--id N]        what needs a decision, with the numbers to decide on
+  confirm <id> --pick <mangaId>  bind a stranded series to the source you chose
   serve                      http api + extension bootstrap (long running)
 
 report, find and compare are read-only.
@@ -53,6 +56,20 @@ const main = async (): Promise<void> => {
         `range=${c.range ? `${c.range[0]}-${c.range[1]}` : "-"}  missing=${c.missing.length} ` +
         `${JSON.stringify(c.missing.slice(0, 8))}`);
       for (const l of c.latest) console.log(`     ch ${String(l.chapter).padStart(7)}  ${l.uploaded}  ${l.scanlator ?? "-"}`);
+      break;
+    }
+    case "candidates": {
+      const id = flag("id");
+      await listCandidates(id !== undefined ? { id: Number(id) } : {});
+      await closeDb();
+      break;
+    }
+    case "confirm": {
+      const id = Number(process.argv[3]);
+      const pick = Number(flag("pick"));
+      if (!Number.isInteger(id) || !Number.isInteger(pick)) throw new Error("usage: confirm <id> --pick <mangaId>");
+      await confirmCandidate(id, pick);
+      await closeDb();
       break;
     }
     case "seed":

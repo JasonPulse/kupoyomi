@@ -57,7 +57,8 @@ input[type=search],input[type=text]{background:#fdfaf1;border:1px solid #a99d84;
 a.series{color:#4a3a7a;text-decoration:none}a.series:hover{text-decoration:underline}
 .bar{height:5px;background:rgba(0,0,0,.16);border-radius:3px;overflow:hidden;min-width:70px}
 .bar > i{display:block;height:100%;background:#6b4fa0}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}}
 .grid{align-items:stretch}
 .grid .tile{display:flex;flex-direction:column;justify-content:center}
 
@@ -79,7 +80,10 @@ export function page(active: Nav, subtitle: string, body: string): string {
     `<a href="${href}" class="${id === active ? "on" : ""}">${label}</a>`;
   return `<!doctype html><html><head><meta charset="utf-8"><title>Kupoyomi</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="icon" href="/favicon.ico"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>${CSS}</style></head><body>
 <header><h1><img src="/icon-192.png" alt="" width="26" height="26">Kupoyomi</h1><nav>
   ${link("library", "/", "Library")}

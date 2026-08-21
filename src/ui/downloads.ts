@@ -52,7 +52,8 @@ export async function liveState(): Promise<Live> {
 const FRAME = `
 .pbar{height:6px;background:rgba(0,0,0,.15);border-radius:3px;overflow:hidden;min-width:90px}
 .pbar > i{display:block;height:100%;background:#6b4fa0}
-.tile-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.tile-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+@media(max-width:900px){.tile-row{grid-template-columns:repeat(2,1fr)}}
 `;
 
 
@@ -65,8 +66,8 @@ export async function downloadsPage(): Promise<string> {
        <div class="tile"><div class="n">downloading</div><b style="font-size:20px" id="t-active">${s.counts.fetching}</b></div>
        <div class="tile"><div class="n">queued</div><b style="font-size:20px" id="t-pending">${s.counts.pending}</b></div>
        <div class="tile"><div class="n">done, last hour</div><b style="font-size:20px" id="t-hour">${s.rate.lastHour}</b></div>
-       <div class="tile"><div class="n">done, last day</div><b style="font-size:20px" id="t-day">${s.rate.lastDay}</b></div>
-       <div class="tile"><div class="n">given up</div><b style="font-size:20px" id="t-stuck">${s.stuck.length}</b></div>
+       <div class="tile"><div class="n">done, last day</div><b style="font-size:20px" id="t-day">${s.rate.lastDay}</b>
+         <span class="n" id="t-stuck-wrap"> &middot; <span id="t-stuck">${s.stuck.length}</span> given up</span></div>
      </div>
      ${news("Downloading now", '<div id="active"></div>')}
      ${news("Just finished", '<div id="recent"></div>')}

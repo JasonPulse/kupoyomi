@@ -12,6 +12,8 @@ const load = (name: string): Buffer | null => {
 export const ASSETS: Record<string, { body: Buffer; type: string } | undefined> = Object.fromEntries(
   ([
     ["/favicon.ico", "favicon.ico", "image/x-icon"],
+    ["/favicon-32.png", "favicon-32.png", "image/png"],
+    ["/favicon-16.png", "favicon-16.png", "image/png"],
     ["/icon-192.png", "icon-192.png", "image/png"],
     ["/icon-512.png", "icon-512.png", "image/png"],
     ["/apple-touch-icon.png", "apple-touch-icon.png", "image/png"],

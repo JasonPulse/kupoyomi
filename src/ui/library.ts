@@ -52,7 +52,6 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
     wanted: rows.reduce((a, r) => a + r.wanted, 0),
     stalled: rows.filter((r) => r.stalled_since && !r.muted).length,
     sourceless: rows.filter((r) => !r.source).length,
-    nocover: rows.filter((r) => !r.cover_path).length,
   };
   const pct = (r: Row): number => (r.held + r.wanted > 0 ? Math.round((r.held / (r.held + r.wanted)) * 100) : 100);
 
@@ -91,7 +90,6 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
        <div class="tile"><div class="n">chapters held</div><b style="font-size:20px">${totals.chapters}</b></div>
        <div class="tile"><div class="n">queued</div><b style="font-size:20px">${totals.wanted}</b></div>
        <div class="tile"><div class="n">gone quiet</div><b style="font-size:20px">${totals.stalled}</b></div>
-       <div class="tile"><div class="n">no cover yet</div><b style="font-size:20px">${totals.nocover}</b></div>
      </div>
      <div class="card" style="padding:10px 14px">
        <form method="get" action="/" style="display:flex;gap:8px;align-items:center">

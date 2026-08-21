@@ -10,6 +10,7 @@ import { backfillUrls } from "./backfill.js";
 import { relayout } from "./relayout.js";
 import { prune } from "./prune.js";
 import { probe } from "./probe.js";
+import { scanWanted, fetchWanted } from "./fetch.js";
 import { parseCheck } from "./parsecheck.js";
 import { serve } from "./server.js";
 
@@ -29,6 +30,8 @@ const usage = `kupoyomi <command>
   relayout [seriesId] [--dry-run] move chapters into the canonical tree
   prune [--dry-run]          drop ledger rows whose file is gone
   probe [--batch N] [--max M] install extensions in batches to find unhoused series
+  scan [seriesId]            queue chapters the bound source has and we do not
+  fetch [--limit N]          download queued chapters
   parse-check                how well chapter numbers can be read from filenames
   serve                      http api + extension bootstrap (long running)
 
@@ -102,6 +105,18 @@ const main = async (): Promise<void> => {
     case "parse-check":
       await parseCheck();
       break;
+    case "scan": {
+      const sid = Number(process.argv[3]);
+      await scanWanted(Number.isInteger(sid) ? { seriesId: sid } : {});
+      await closeDb();
+      break;
+    }
+    case "fetch": {
+      const lim = flag("limit");
+      await fetchWanted(lim !== undefined ? { limit: Number(lim) } : {});
+      await closeDb();
+      break;
+    }
     case "probe": {
       const b = flag("batch"), m = flag("max");
       await probe({

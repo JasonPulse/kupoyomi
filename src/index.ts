@@ -6,6 +6,7 @@ import { seedLedger } from "./seed.js";
 import { listCandidates, confirmCandidate } from "./confirm.js";
 import { remap } from "./remap.js";
 import { backfillUrls } from "./backfill.js";
+import { relayout } from "./relayout.js";
 import { serve } from "./server.js";
 
 const usage = `kupoyomi <command>
@@ -20,6 +21,7 @@ const usage = `kupoyomi <command>
   candidates [--id N]        what needs a decision, with the numbers to decide on
   confirm <id> --pick <mangaId>  bind a stranded series to the source you chose
   remap <seriesId> [--dry-run]   adopt stranded files into the confirmed binding
+  relayout [seriesId] [--dry-run] move chapters into the canonical tree
   serve                      http api + extension bootstrap (long running)
 
 report, find and compare are read-only.
@@ -79,6 +81,15 @@ const main = async (): Promise<void> => {
       const sid = Number(process.argv[3]);
       if (!Number.isInteger(sid)) throw new Error("usage: remap <seriesId> [--dry-run]");
       await remap(sid, { dryRun: process.argv.includes("--dry-run") });
+      await closeDb();
+      break;
+    }
+    case "relayout": {
+      const sid = Number(process.argv[3]);
+      await relayout({
+        ...(Number.isInteger(sid) ? { seriesId: sid } : {}),
+        dryRun: process.argv.includes("--dry-run"),
+      });
       await closeDb();
       break;
     }

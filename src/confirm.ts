@@ -17,21 +17,30 @@ const cache = async (
   latest: Array<{ chapter: number | null; uploaded: string; scanlator: string | null }>,
   note: string | null, offered: number[], held: Set<number>,
 ): Promise<void> => {
-  const newCount = offered.filter((n) => !held.has(n)).length;
-  const lostCount = [...held].filter((n) => !offered.includes(n)).length;
+  // Split the comparison into the three things it was previously smearing together.
+  const heldMax = held.size > 0 ? Math.max(...held) : 0;
+  const offeredSet = new Set(offered);
+  const newBeyond = offered.filter((n) => n > heldMax).length;
+  const fillsGaps = offered.filter((n) => n <= heldMax && !held.has(n)).length;
+  const notCarried = [...held].filter((n) => !offeredSet.has(n)).length;
+  const newCount = newBeyond + fillsGaps;
+  const lostCount = notCarried;
   const lastUpload = latest.map((l) => l.uploaded).sort().at(-1) ?? null;
   await db().query(
     `INSERT INTO candidate_comparison
        (candidate_id, manga_id, source_name, source_id, source_url, chapters, range_lo, range_hi,
-        gaps, latest, note, new_count, lost_count, last_upload, checked_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
+        gaps, latest, note, new_count, lost_count, last_upload,
+        new_beyond, fills_gaps, not_carried, checked_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17, now())
      ON CONFLICT (candidate_id, manga_id) DO UPDATE SET
        chapters = EXCLUDED.chapters, range_lo = EXCLUDED.range_lo, range_hi = EXCLUDED.range_hi,
        gaps = EXCLUDED.gaps, latest = EXCLUDED.latest, note = EXCLUDED.note,
        new_count = EXCLUDED.new_count, lost_count = EXCLUDED.lost_count,
-       last_upload = EXCLUDED.last_upload, checked_at = now()`,
+       last_upload = EXCLUDED.last_upload, new_beyond = EXCLUDED.new_beyond,
+       fills_gaps = EXCLUDED.fills_gaps, not_carried = EXCLUDED.not_carried, checked_at = now()`,
     [candidateId, c.mangaId, c.sourceName, c.sourceId, c.url ?? null, chapters, lo, hi, gaps,
-     JSON.stringify(latest), note, newCount, lostCount, lastUpload]);
+     JSON.stringify(latest), note, newCount, lostCount, lastUpload,
+     newBeyond, fillsGaps, notCarried]);
 };
 
 /**

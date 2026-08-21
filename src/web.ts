@@ -34,6 +34,7 @@ type CmpRow = {
   range_lo: string | null; range_hi: string | null; gaps: number;
   latest: Array<{ chapter: number | null; uploaded: string; scanlator: string | null }>; note: string | null;
   new_count: number | null; lost_count: number | null; last_upload: string | null;
+  new_beyond: number | null; fills_gaps: number | null; not_carried: number | null;
 };
 
 export async function reviewPage(): Promise<string> {
@@ -45,9 +46,9 @@ export async function reviewPage(): Promise<string> {
   // content, so they match on name and are worthless as a home.
   const cmps = (await p.query<CmpRow>(
     `SELECT candidate_id, manga_id, source_name, source_url, chapters, range_lo, range_hi, gaps,
-            latest, note, new_count, lost_count, last_upload
+            latest, note, new_count, lost_count, last_upload, new_beyond, fills_gaps, not_carried
        FROM candidate_comparison WHERE chapters > 0
-      ORDER BY new_count DESC NULLS LAST, lost_count ASC NULLS LAST`)).rows;
+      ORDER BY new_beyond DESC NULLS LAST, fills_gaps DESC NULLS LAST`)).rows;
   const done = (await p.query<{ n: string }>("SELECT count(*) n FROM import_candidate WHERE confirmed_series_id IS NOT NULL")).rows[0];
   const led = (await p.query<{ s: string; c: string }>(
     "SELECT (SELECT count(*) FROM series) s, (SELECT count(*) FROM chapter) c")).rows[0];
@@ -67,8 +68,12 @@ export async function reviewPage(): Promise<string> {
 
     // Best is the one that adds the most without losing anything. Adding chapters is
     // the point; losing chapters you already own is the thing to avoid.
+    // The reason to migrate is new releases past where you are. Filling holes is a
+    // bonus; a source not carrying old chapters costs nothing, since the files stay.
     const best = [...opts].sort((a, b) =>
-      (b.new_count ?? 0) - (a.new_count ?? 0) || (a.lost_count ?? 0) - (b.lost_count ?? 0))[0];
+      (b.new_beyond ?? 0) - (a.new_beyond ?? 0) ||
+      (b.fills_gaps ?? 0) - (a.fills_gaps ?? 0) ||
+      (a.not_carried ?? 0) - (b.not_carried ?? 0))[0];
 
     // Same source can appear twice: sites carry duplicate entries for one series, so
     // the url is the only thing that tells them apart.
@@ -76,18 +81,19 @@ export async function reviewPage(): Promise<string> {
       .filter((n, i, a) => a.indexOf(n) !== i));
 
     const rows = opts.length === 0
-      ? `<tr><td colspan="6" class="dim">no live source carries this &mdash; needs a wider search</td></tr>`
+      ? `<tr><td colspan="7" class="dim">no live source carries this &mdash; needs a wider search</td></tr>`
       : opts.map((o) => {
-          const adds = o.new_count ?? 0, loses = o.lost_count ?? 0;
-          const good = adds > 0 && loses === 0;
+          const beyond = o.new_beyond ?? 0, fills = o.fills_gaps ?? 0, absent = o.not_carried ?? 0;
+          const good = beyond > 0;
           const slug = dupNames.has(o.source_name) && o.source_url
             ? `<div class="dim" style="font-size:11px">${esc(o.source_url.slice(0, 44))}</div>` : "";
           const groups = [...new Set((o.latest ?? []).map((l) => l.scanlator).filter(Boolean))].join(", ");
           return `<tr>
             <td class="${good ? "rec" : ""}">${esc(o.source_name)}${o === best ? " &larr; best" : ""}${slug}</td>
             <td>${fmt(o.range_lo)}&ndash;${fmt(o.range_hi)} <span class="dim">(${o.chapters})</span></td>
-            <td class="${adds > 0 ? "rec" : "dim"}"><b>+${adds}</b></td>
-            <td class="${loses > 0 ? "bad" : "dim"}">${loses > 0 ? `-${loses}` : "0"}</td>
+            <td class="${beyond > 0 ? "rec" : "dim"}"><b>${beyond > 0 ? `+${beyond}` : "0"}</b></td>
+            <td class="${fills > 0 ? "rec" : "dim"}">${fills > 0 ? `+${fills}` : "0"}</td>
+            <td class="dim">${absent > 0 ? absent : "-"}</td>
             <td class="dim">${o.last_upload ? esc(String(o.last_upload).slice(0, 10)) : "-"}${
               groups ? `<div class="latest">${esc(groups.slice(0, 40))}</div>` : ""}</td>
             <td><form method="post" action="/confirm">
@@ -105,7 +111,11 @@ export async function reviewPage(): Promise<string> {
           <button class="weak" type="submit" title="Finished series: keep the files, bind no source, stop asking">
             finished &mdash; no migration needed</button>
         </form></div>
-      <table><tr><th>source</th><th>their range</th><th>adds</th><th>loses</th><th>last upload</th><th></th></tr>
+      <table><tr><th>source</th><th>their range</th>
+        <th title="chapters past your highest">new releases</th>
+        <th title="holes inside your range this source could fill">fills gaps</th>
+        <th title="chapters you hold that this source does not carry -- you keep the files either way">not carried</th>
+        <th>last upload</th><th></th></tr>
       ${rows}</table></div>`;
   }).join("");
 

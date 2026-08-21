@@ -17,34 +17,43 @@ export type Held = { file: string; scanlator: string | null; pageCount: number |
 export async function heldChapters(
   deadSource: string, folder: string, suwayomiMangaId: number | null,
 ): Promise<Map<number, Held>> {
-  const out = new Map<number, Held>();
   const dir = `${config.legacyRoot}/${deadSource}/${folder}`;
-
-  if (suwayomiMangaId !== null) {
-    const rows = (await db().query<{ chapter_number: string; name: string | null; scanlator: string | null; page_count: number | null; uploaded_at: Date | null }>(
-      `SELECT chapter_number, name, scanlator, page_count, uploaded_at FROM legacy_chapter
-        WHERE suwayomi_manga_id = $1 AND is_downloaded AND chapter_number IS NOT NULL
-        ORDER BY chapter_number`, [suwayomiMangaId])).rows;
-    for (const r of rows) {
-      const base = r.scanlator ? `${sanitize(r.scanlator)}_${sanitize(r.name ?? "")}` : sanitize(r.name ?? "");
-      const file = `${base}.cbz`;
-      if (!existsSync(`${dir}/${file}`)) continue;        // Suwayomi's flag drifts
-      out.set(Number(r.chapter_number), {
-        file, scanlator: r.scanlator, pageCount: r.page_count, uploadedAt: r.uploaded_at,
-      });
-    }
-    if (out.size > 0) return out;
-  }
-
   const entry = (await scanLegacyTree()).find((d) => d.sourceDir === deadSource && d.folder === folder);
+
+  // The filesystem decides what we hold. Suwayomi's isDownloaded flag has been wrong
+  // in both directions on this library -- 157 chapters flagged that had no file, and
+  // 43 files it did not know it had -- so it cannot gate this.
+  const out = new Map<number, Held>();
   const sizes = new Map<number, number>();
+  const fileFor = new Map<string, number>();
   for (const f of entry?.files ?? []) {
     const n = parseChapterNumber(f);
     if (n === null) continue;
     const size = statSync(`${dir}/${f}`).size;
-    if ((sizes.get(n) ?? 0) < size) {
+    fileFor.set(f, n);
+    // One file per chapter number is required by the ledger; the largest is the
+    // complete scanlation.
+    if ((sizes.get(n) ?? -1) < size) {
       sizes.set(n, size);
       out.set(n, { file: f, scanlator: null, pageCount: null, uploadedAt: null });
+    }
+  }
+
+  // The snapshot contributes metadata only: which group translated it, page count,
+  // upload date. It never adds or removes a chapter.
+  if (suwayomiMangaId !== null) {
+    const rows = (await db().query<{ chapter_number: string; name: string | null; scanlator: string | null; page_count: number | null; uploaded_at: Date | null }>(
+      `SELECT chapter_number, name, scanlator, page_count, uploaded_at FROM legacy_chapter
+        WHERE suwayomi_manga_id = $1 AND chapter_number IS NOT NULL`, [suwayomiMangaId])).rows;
+    for (const r of rows) {
+      const base = r.scanlator ? `${sanitize(r.scanlator)}_${sanitize(r.name ?? "")}` : sanitize(r.name ?? "");
+      const file = `${base}.cbz`;
+      const held = out.get(Number(r.chapter_number));
+      if (held && held.file === file) {
+        held.scanlator = r.scanlator;
+        held.pageCount = r.page_count;
+        held.uploadedAt = r.uploaded_at;
+      }
     }
   }
   return out;

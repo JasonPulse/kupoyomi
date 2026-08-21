@@ -116,7 +116,13 @@ export async function reviewPage(): Promise<string> {
     // become the binding for a run it does not have, so it is shown for information
     // and cannot be chosen.
     const heldCount = k.held_count ?? k.file_count;
-    const viable = (o: CmpRow): boolean => o.chapters >= Math.max(1, heldCount * 0.5);
+    // Two independent tests. It must carry enough of the run to serve as the binding,
+    // and it must actually offer something you do not have -- migrating to a source
+    // with nothing newer is strictly a downgrade, which is the situation that started
+    // this whole project.
+    const carries = (o: CmpRow): boolean => o.chapters >= Math.max(1, heldCount * 0.5);
+    const offersSomething = (o: CmpRow): boolean => (o.new_beyond ?? 0) > 0;
+    const viable = (o: CmpRow): boolean => carries(o) && offersSomething(o);
     const usable = opts.filter(viable);
     const best = [...usable].sort((a, b) =>
       (b.new_beyond ?? 0) - (a.new_beyond ?? 0) ||
@@ -131,8 +137,8 @@ export async function reviewPage(): Promise<string> {
     const rows = opts.length === 0
       ? `<tr><td colspan="7" class="dim">no live source carries this &mdash; needs a wider search</td></tr>`
       : usable.length === 0
-      ? `<tr><td colspan="7" class="dim">every match is a fragment of what you already hold &mdash;
-           either it is finished, or it needs a wider search</td></tr>`
+      ? `<tr><td colspan="7" class="dim">no source offers anything past chapter ${fmt(k.held_hi)} &mdash;
+           staying put is better than migrating. Either it is finished, or it needs a wider search.</td></tr>`
       : opts.map((o) => {
           const beyond = o.new_beyond ?? 0, fills = o.fills_gaps ?? 0, absent = o.not_carried ?? 0;
           const ok = viable(o);
@@ -152,7 +158,10 @@ export async function reviewPage(): Promise<string> {
               <input type="hidden" name="id" value="${k.id}">
               <input type="hidden" name="pick" value="${o.manga_id}">
               <button class="${good ? "" : "weak"}" type="submit">use this</button>
-            </form>` : `<span class="dim" title="carries ${o.chapters} of your ${heldCount} chapters">fragment</span>`}</td></tr>`;
+            </form>` : `<span class="dim" title="${carries(o)
+                ? `carries ${o.chapters} chapters but nothing past your ${fmt(k.held_hi)}`
+                : `carries only ${o.chapters} of your ${heldCount} chapters`}">${
+                carries(o) ? "nothing newer" : "fragment"}</span>`}</td></tr>`;
         }).join("");
 
     return `<div class="card">

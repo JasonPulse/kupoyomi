@@ -20,6 +20,8 @@ const PATTERNS: RegExp[] = [
   // Note the leading class rather than \b: underscore is a word character, so \b
   // never fires in "[0001]_Chapter_1" and that whole naming style failed to parse.
   /(?:^|[\s._\-\[\]])ch(?:ap(?:ter)?)?[\s._-]*(\d+(?:\.\d+)?)/i,
+  // Manhwa sources number in episodes: "Official_Episode 12.cbz"
+  /(?:^|[\s._\-\[\]])ep(?:isode)?[\s._-]*(\d+(?:\.\d+)?)/i,
   // Our own canonical naming: "Title - c0070 [Group].cbz"
   /(?:^|[\s._\-])c(\d{3,4}(?:\.\d+)?)(?:$|[\s._\-\[])/,
 ];

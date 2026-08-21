@@ -30,7 +30,9 @@ main{padding:18px 20px 40px;max-width:1240px;margin:0 auto}
 .card::before,.tile::before{top:0}
 .card::after,.tile::after{bottom:0;background-image:url(/newsbottom.png)}
 /* Padding clears the caps so content never sits under the ornament. */
-.card{padding:34px 30px}
+/* 34px clears the 27px cap. Anything smaller and the ornament covers the content:
+   the library filter form vanished behind it entirely. */
+.card{padding:34px 30px;min-height:78px}
 .tile{padding:30px 22px;margin-bottom:0}
 
 /* Dark ink on parchment, since the panels are now light. */

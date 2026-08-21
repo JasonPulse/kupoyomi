@@ -91,7 +91,7 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
        <div class="tile"><div class="n">queued</div><b style="font-size:20px">${totals.wanted}</b></div>
        <div class="tile"><div class="n">gone quiet</div><b style="font-size:20px">${totals.stalled}</b></div>
      </div>
-     <div class="card" style="padding:10px 14px">
+     <div class="card">
        <form method="get" action="/" style="display:flex;gap:8px;align-items:center">
          <input type="search" name="q" placeholder="filter by title" value="${esc(q ?? "")}">
          <input type="hidden" name="view" value="${esc(view)}">

@@ -6,6 +6,9 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 const num = (name: string, dflt: number): number => Number(process.env[name] ?? dflt);
 
 export type SchedulerState = {
+  /** Set while a job is in flight, so a wedged loop is visible rather than silent. */
+  scanStartedAt?: string;
+  fetchStartedAt?: string;
   lastScan?: { at: string; error?: string };
   lastFetch?: { at: string; downloaded: number; failed: number; error?: string };
   lastStallCheck?: { at: string; flagged: number };
@@ -13,8 +16,14 @@ export type SchedulerState = {
 };
 export const state: SchedulerState = {};
 
-/** Only one of these runs at a time, so a manual command cannot collide with the loop. */
-let busy = false;
+/**
+ * Separate locks per job. Sharing one meant a scan that hung on an unresponsive source
+ * blocked every fetch tick behind it: downloads simply stopped and the only symptom was
+ * an absent lastFetch. They touch different rows, so they do not need to exclude
+ * each other.
+ */
+let scanning = false;
+let fetching = false;
 
 /**
  * Notifies once per event. A stalled series that keeps being stalled is not news, so
@@ -104,34 +113,43 @@ export function startScheduler(): void {
   void (async () => {
     for (;;) {
       try {
-        if (!busy) {
-          busy = true;
+        if (!scanning) {
+          scanning = true;
+          state.scanStartedAt = new Date().toISOString();
           await scanWanted();
           state.lastScan = { at: new Date().toISOString() };
+          delete state.scanStartedAt;
         }
       } catch (err) {
         state.lastScan = { at: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };
-      } finally { busy = false; }
+        delete state.scanStartedAt;
+      } finally { scanning = false; }
       await sleep(scanEvery);
     }
   })();
 
   void (async () => {
-    await sleep(60_000);                 // let the extension bootstrap settle first
+    await sleep(20_000);                 // let the extension bootstrap settle first
     for (;;) {
       try {
-        if (!busy) {
-          busy = true;
-          const before = state.lastFetch?.downloaded ?? 0;
+        if (!fetching) {
+          fetching = true;
+          state.fetchStartedAt = new Date().toISOString();
+          const done = (await db().query<{ n: string }>(
+            "SELECT count(*) n FROM wanted WHERE state = 'done'")).rows[0];
           await fetchWanted({ limit: batch, concurrency });
-          const out = (await db().query<{ n: string }>(
-            "SELECT count(*) n FROM wanted WHERE state <> 'done'")).rows[0];
-          state.outstanding = Number(out?.n ?? 0);
-          state.lastFetch = { at: new Date().toISOString(), downloaded: before, failed: 0 };
+          const after = (await db().query<{ d: string; o: string }>(
+            `SELECT count(*) FILTER (WHERE state = 'done') AS d,
+                    count(*) FILTER (WHERE state <> 'done') AS o FROM wanted`)).rows[0];
+          state.outstanding = Number(after?.o ?? 0);
+          state.lastFetch = { at: new Date().toISOString(),
+            downloaded: Number(after?.d ?? 0) - Number(done?.n ?? 0), failed: 0 };
+          delete state.fetchStartedAt;
         }
       } catch (err) {
         state.lastFetch = { at: new Date().toISOString(), downloaded: 0, failed: 0, error: err instanceof Error ? err.message : String(err) };
-      } finally { busy = false; }
+        delete state.fetchStartedAt;
+      } finally { fetching = false; }
       await sleep(fetchEvery);
     }
   })();

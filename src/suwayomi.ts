@@ -2,11 +2,18 @@ import { config } from "./config.js";
 
 type GqlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
+/**
+ * Every call is bounded. Without a timeout one unresponsive source hung the scheduler's
+ * scan indefinitely, and because scan and fetch shared a lock, downloading stopped
+ * altogether for hours with nothing in the logs to say why.
+ */
 export async function gql<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  const ms = Number(process.env["SUWAYOMI_TIMEOUT_MS"] ?? 45_000);
   const res = await fetch(config.suwayomiUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(ms),
   });
   if (!res.ok) throw new Error(`suwayomi ${res.status} ${res.statusText}`);
   const body = (await res.json()) as GqlResponse<T>;

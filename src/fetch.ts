@@ -119,7 +119,9 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
 
         const images: Array<{ name: string; data: Buffer }> = [];
         for (const [i, rel] of pages.entries()) {
-          const res = await fetch(`${httpBase()}${rel}`);
+          const res = await fetch(`${httpBase()}${rel}`, {
+            signal: AbortSignal.timeout(Number(process.env["PAGE_TIMEOUT_MS"] ?? 60_000)),
+          });
           if (!res.ok) throw new Error(`page ${i} returned ${res.status}`);
           const buf = Buffer.from(await res.arrayBuffer());
           const ext = (res.headers.get("content-type") ?? "").includes("png") ? "png"

@@ -61,8 +61,12 @@ export async function seedLedger(): Promise<void> {
   // Read entirely from the snapshot, never from Suwayomi: this has to keep working
   // after the old instance is deleted.
   const p = db();
-  const liveSources = new Set(
-    (await p.query<{ display_name: string }>("SELECT display_name FROM legacy_source")).rows.map((r) => r.display_name));
+  // display name -> Suwayomi source id. The disk only carries display names, but the
+  // binding must hold the real id or later upserts keyed on it will not match.
+  const sourceIds = new Map(
+    (await p.query<{ source_id: string; display_name: string }>(
+      "SELECT source_id, display_name FROM legacy_source")).rows.map((r) => [r.display_name, r.source_id]));
+  const liveSources = new Set(sourceIds.keys());
   const legacy = (await p.query<LegacyManga>(
     "SELECT suwayomi_id, title, source_name, status, in_library FROM legacy_manga")).rows;
   const disk = await scanLegacyTree();
@@ -99,7 +103,7 @@ export async function seedLedger(): Promise<void> {
           `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
            VALUES ($1,$2,$3,$4,'primary')
            ON CONFLICT (series_id, source_id, source_manga_id) DO UPDATE SET role = 'primary' RETURNING id`,
-          [seriesId, d.sourceDir, d.sourceDir, row.suwayomi_id]);
+          [seriesId, sourceIds.get(d.sourceDir) ?? d.sourceDir, d.sourceDir, row.suwayomi_id]);
         const bindingId = b.rows[0]!.id;
 
         for (const [num, c] of winners) {

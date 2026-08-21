@@ -77,6 +77,18 @@ export async function confirmCandidate(id: number, mangaId: number): Promise<voi
        ON CONFLICT (folder) DO UPDATE SET title = EXCLUDED.title RETURNING id`,
       [title, canonical(title)]);
     const seriesId = s.rows[0]!.id;
+
+    // The series may already exist with a primary binding: four series live on disk
+    // under both a dead source and a live one, so the seeder got there first. If the
+    // pick is that same binding, this is a no-op. If it differs, the pick wins and
+    // the incumbent becomes supplemental rather than being discarded.
+    const existing = (await client.query<{ id: number; source_manga_id: number; source_name: string }>(
+      "SELECT id, source_manga_id, source_name FROM series_binding WHERE series_id = $1 AND role = 'primary'",
+      [seriesId])).rows[0];
+    if (existing && existing.source_manga_id !== pick.mangaId) {
+      await client.query("UPDATE series_binding SET role = 'supplemental' WHERE id = $1", [existing.id]);
+      console.log(`  demoted ${existing.source_name} to supplemental`);
+    }
     await client.query(
       `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
        VALUES ($1,$2,$3,$4,'primary')

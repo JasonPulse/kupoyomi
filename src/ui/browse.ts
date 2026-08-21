@@ -47,17 +47,20 @@ export function parseFilterParams(values: string[]): unknown[] {
 }
 
 export async function browseIndex(): Promise<string> {
-  const sources = (await installedSources()).filter((s) => s.lang === "en" || s.lang === "all")
-    .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  const rows = sources.map((s) => `<tr>
+  const sources = (await installedSources()).filter((s) => s.lang === "en" || s.lang === "all");
+  // supportsLatest false has tracked exactly with an empty popular listing on this
+  // library, so it is worth warning about rather than letting the page come up blank.
+  const rows = [...sources].sort((a, b) => Number(b.supportsLatest) - Number(a.supportsLatest)
+      || a.displayName.localeCompare(b.displayName)).map((s) => `<tr>
     <td><a class="series" href="/browse/${encodeURIComponent(s.id)}">${esc(s.displayName)}</a></td>
-    <td class="dim">${esc(s.lang)}${s.isNsfw ? ' <span class="dim">18+</span>' : ""}</td>
+    <td class="dim">${esc(s.lang)}${s.isNsfw ? " &middot; 18+" : ""}</td>
+    <td class="dim">${s.supportsLatest ? "popular + latest" : '<span class="warn">may not list anything</span>'}</td>
   </tr>`).join("");
   return page("browse", `${sources.length} sources`,
     `<div class="card"><div class="title">Browse a source</div>
        <div class="meta">Metadata catalogues do not carry everything, so browsing goes straight at the source.
          Each one exposes its own genre and status filters.</div>
-       <table><tr><th>source</th><th>lang</th></tr>${rows}</table></div>
+       <table><tr><th>source</th><th>lang</th><th>listings</th></tr>${rows}</table></div>
      <div class="card"><div class="title">Need a different site?</div>
        <div class="meta"><a class="series" href="/extensions">Install another extension</a> &mdash;
          1372 available, and only what you install is searched.</div></div>`);
@@ -153,7 +156,20 @@ export async function browseSource(sourceId: string, type: string, filters: stri
      });
 
      const es = new EventSource(url);
-     let n = 0;
+     let n = 0, finished = false;
+     status.textContent = 'contacting the source';
+     es.addEventListener('start', e => {
+       const d = JSON.parse(e.data);
+       status.textContent = 'reading ' + d.source + ' (' + d.kind.toLowerCase() + ')';
+     });
+     es.addEventListener('page', e => {
+       const d = JSON.parse(e.data);
+       status.textContent = n + ' titles from ' + d.page + ' page' + (d.page===1?'':'s') + (d.more ? ', more available' : '');
+     });
+     es.addEventListener('failed', e => {
+       const d = JSON.parse(e.data);
+       status.innerHTML = '<span class="bad">this source returned an error: ' + d.message.slice(0,140) + '</span>';
+     });
      es.addEventListener('hit', e => {
        const h = JSON.parse(e.data); n++;
        const d = document.createElement('div');
@@ -170,30 +186,61 @@ export async function browseSource(sourceId: string, type: string, filters: stri
        detail(h.mangaId, d);
        status.textContent = n + ' titles';
      });
-     es.addEventListener('done', () => { es.close(); status.textContent = n + ' titles — done'; });
-     es.onerror = () => { es.close(); };
+     es.addEventListener('done', () => {
+       finished = true; es.close();
+       if (n === 0 && !status.innerHTML.includes('error')) {
+         status.innerHTML = '<span class="warn">this source has no browsable listing</span> — ' +
+           'some sources only answer searches. <a href="/search">Search instead</a>, or pick another source.';
+       } else if (n > 0) { status.textContent = n + ' titles'; }
+     });
+     // A silent onerror was why the page sat on 'loading' whenever anything went wrong.
+     es.onerror = () => {
+       es.close();
+       if (!finished) status.innerHTML = '<span class="bad">lost the connection to the server</span>';
+     };
      </script>`);
 }
 
-/** Streams one page of a source's popular or latest listing. */
-export async function streamBrowse(res: ServerResponse, sourceId: string, type: string, filters: string[]): Promise<void> {
+/**
+ * Streams a source's listing page by page.
+ *
+ * One request returns one page, so fetching several in sequence is what makes results
+ * keep arriving rather than landing in a single lump. Every terminal state is reported:
+ * a source that returns nothing (BaoBua does for POPULAR) used to leave the page saying
+ * "loading" forever.
+ */
+export async function streamBrowse(
+  res: ServerResponse, sourceId: string, type: string, filters: string[], maxPages = 3,
+): Promise<void> {
   res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
   const send = (event: string, data: unknown): void => { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
-  const src = await sourceFilters(sourceId);
-  const parsed = parseFilterParams(filters);
-  // A filtered listing is a SEARCH with no text: POPULAR ignores filters entirely.
-  const kind = parsed.length > 0 ? "SEARCH" : (type === "LATEST" ? "LATEST" : "POPULAR");
+
+  let name = sourceId;
   try {
-    const r = await gql<{ fetchSourceManga: { hasNextPage: boolean; mangas: Array<{ id: number; title: string; url: string; thumbnailUrl: string | null }> } }>(
-      `mutation($s:LongString!,$t:FetchSourceMangaType!,$f:[FilterChangeInput!]){
-         fetchSourceManga(input:{source:$s,type:$t,page:1,filters:$f}){ hasNextPage mangas{ id title url thumbnailUrl } } }`,
-      { s: sourceId, t: kind, f: parsed });
-    for (const m of r.fetchSourceManga.mangas) {
-      send("hit", { sourceId, sourceName: src.displayName, mangaId: m.id, title: m.title, url: m.url, thumb: `/thumb/${m.id}` });
+    const src = await sourceFilters(sourceId);
+    name = src.displayName;
+    const parsed = parseFilterParams(filters);
+    // A filtered listing is a SEARCH with no text: POPULAR ignores filters entirely.
+    const kind = parsed.length > 0 ? "SEARCH" : (type === "LATEST" ? "LATEST" : "POPULAR");
+    send("start", { source: name, kind });
+
+    let total = 0;
+    for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
+      const r = await gql<{ fetchSourceManga: { hasNextPage: boolean; mangas: Array<{ id: number; title: string; url: string; thumbnailUrl: string | null }> } }>(
+        `mutation($s:LongString!,$t:FetchSourceMangaType!,$p:Int!,$f:[FilterChangeInput!]){
+           fetchSourceManga(input:{source:$s,type:$t,page:$p,filters:$f}){ hasNextPage mangas{ id title url thumbnailUrl } } }`,
+        { s: sourceId, t: kind, p: pageNo, f: parsed });
+      for (const m of r.fetchSourceManga.mangas) {
+        send("hit", { sourceId, sourceName: name, mangaId: m.id, title: m.title, url: m.url, thumb: `/thumb/${m.id}` });
+        total++;
+      }
+      send("page", { page: pageNo, total, more: r.fetchSourceManga.hasNextPage });
+      if (!r.fetchSourceManga.hasNextPage) break;
     }
+    send("done", { total, source: name, kind });
   } catch (err) {
-    send("error", { message: err instanceof Error ? err.message : String(err) });
+    send("failed", { message: err instanceof Error ? err.message : String(err), source: name });
+    send("done", { total: 0 });
   }
-  send("done", {});
   res.end();
 }

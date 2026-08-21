@@ -15,7 +15,7 @@ export async function gql<T>(query: string, variables: Record<string, unknown> =
   return body.data;
 }
 
-export type Source = { id: string; displayName: string; lang: string; isNsfw: boolean };
+export type Source = { id: string; displayName: string; lang: string; isNsfw: boolean; supportsLatest: boolean };
 export type Chapter = {
   name: string | null;
   pageCount: number | null;
@@ -35,7 +35,7 @@ export type Manga = {
 
 export const installedSources = async (): Promise<Source[]> =>
   (await gql<{ sources: { nodes: Source[] } }>(
-    `{ sources { nodes { id displayName lang isNsfw } } }`,
+    `{ sources { nodes { id displayName lang isNsfw supportsLatest } } }`,
   )).sources.nodes;
 
 /** Every manga row, including the thousands of search stubs. */

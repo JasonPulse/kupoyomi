@@ -8,16 +8,17 @@ header{padding:9px 20px 0;background:#1b1b1b;border-bottom:1px solid #3a3428;pos
   display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap}
 header h1{font-size:15px;margin:0 4px 5px 0;font-weight:600;color:#eee;display:flex;align-items:center;gap:8px}
 header h1 img{border-radius:50%;display:block}
-/* Tabs cut from the FFXI news header: the parchment strip 9-sliced so it stretches to
-   the label, with the moogle as the active tab's left cap. */
-nav{display:flex;gap:3px;align-items:flex-end}
-nav a{display:inline-block;height:26px;line-height:26px;font-size:12.5px;text-decoration:none;
-  color:#6d6055;border-style:solid;border-width:0 20px 0 20px;
-  border-image:url(/tab-off.png) 0 20 0 20 fill stretch;
-  filter:saturate(.9)}
-nav a:hover{color:#cbbfa8;filter:brightness(1.35)}
-nav a.on{color:#2b2318;font-weight:700;border-width:0 22px 0 30px;
-  border-image-source:url(/tab-on.png);border-image-slice:0 22 0 30;filter:none}
+/* One tab carries the parchment, the rest are plain text. Seven bright bars fought the
+   content, and dimming them made the labels illegible -- so the art marks the active
+   page instead of decorating every tab. The moogle is the strip's own left end and
+   travels along the bar as you navigate. */
+nav{display:flex;gap:6px;align-items:flex-end}
+nav a{display:inline-block;height:28px;line-height:28px;padding:0 10px;font-size:12.5px;
+  text-decoration:none;color:#9a9aa2;border-radius:3px 3px 0 0}
+nav a:hover{color:#dfe3ea;background:#252525}
+nav a.on{color:#2b2318;font-weight:700;padding:0 6px 0 4px;background:none;
+  border-style:solid;border-width:0 20px 0 32px;
+  border-image:url(/tab-on.png) 0 20 0 32 fill stretch}
 .sub{color:#888;font-size:12px;margin-left:auto;padding-bottom:6px}
 main{padding:18px 20px;max-width:1200px}
 .card{background:#1a1a1a;border:1px solid #2e2e2e;border-radius:6px;margin-bottom:14px;padding:14px}

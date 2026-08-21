@@ -31,7 +31,18 @@ export async function listCandidates(opts: { id?: number } = {}): Promise<void> 
       continue;
     }
     for (const c of r.candidates) {
-      const cmp = await compare(c.mangaId);
+      let cmp;
+      try {
+        cmp = await compare(c.mangaId);
+      } catch (err) {
+        console.log(`     --pick ${String(c.mangaId).padEnd(6)} ${c.sourceName.padEnd(20)} ` +
+          `UNAVAILABLE (${err instanceof Error ? err.message : String(err)})`);
+        continue;
+      }
+      if (cmp.chapters === 0) {
+        console.log(`     --pick ${String(c.mangaId).padEnd(6)} ${c.sourceName.padEnd(20)} no chapters -- useless as a home`);
+        continue;
+      }
       const range = cmp.range ? `${cmp.range[0]}-${cmp.range[1]}` : "-";
       console.log(`     --pick ${String(c.mangaId).padEnd(6)} ${c.sourceName.padEnd(20)} ` +
         `chapters=${String(cmp.chapters).padStart(4)} range=${range} missing=${cmp.missing.length}`);

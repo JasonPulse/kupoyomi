@@ -92,8 +92,14 @@ export async function findHomes(opts: { only?: string; limit?: number; includeNs
  * there is no way around the round trip.
  */
 export async function compare(mangaId: number) {
-  await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
-    { id: mangaId });
+  try {
+    await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
+      { id: mangaId });
+  } catch {
+    // A source that reports no chapters, or is briefly unreachable, is a fact about
+    // that candidate rather than a reason to abandon the whole comparison. Fall
+    // through and report whatever is already known.
+  }
   const d = await gql<{ manga: { title: string; source: { displayName: string } | null;
     chapters: { totalCount: number; nodes: Array<{ chapterNumber: number | null; uploadDate: string | null; scanlator: string | null }> } } }>(
     `{ manga(id:${mangaId}){ title source{displayName} chapters{ totalCount nodes{ chapterNumber uploadDate scanlator } } } }`);

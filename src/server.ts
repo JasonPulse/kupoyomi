@@ -3,7 +3,9 @@ import { db } from "./db.js";
 import { installedExtensions, installExtension, serverAbout, fetchExtensionIndex } from "./suwayomi.js";
 import { reviewPage, handleConfirmPost, handleArchivePost } from "./web.js";
 import { libraryPage } from "./ui/library.js";
-import { searchPage, addSeries } from "./ui/search.js";
+import { addSeries } from "./ui/search.js";
+import { searchPage } from "./ui/searchpage.js";
+import { streamSearch, mangaDetail } from "./ui/searchstream.js";
 import { seriesPage } from "./ui/series.js";
 import { queuePage } from "./ui/queue.js";
 import { scanWanted } from "./fetch.js";
@@ -133,6 +135,17 @@ export async function serve(): Promise<void> {
     if (req.method === "GET") {
       if (path === "/") return html(libraryPage(url.searchParams.get("q") ?? undefined));
       if (path === "/search") return html(searchPage(url.searchParams.get("q") ?? undefined));
+      if (path === "/api/search") {
+        streamSearch(res, url.searchParams.get("q") ?? "").catch(() => res.end());
+        return;
+      }
+      if (path === "/api/detail") {
+        const id = Number(url.searchParams.get("mangaId"));
+        if (!Number.isInteger(id)) return send(400, { error: "mangaId required" });
+        mangaDetail(id).then((d) => send(200, d))
+          .catch((e: unknown) => send(200, { chapters: null, error: e instanceof Error ? e.message : String(e) }));
+        return;
+      }
       if (path === "/review") return html(reviewPage());
       if (path === "/queue") return html(queuePage());
       const m = /^\/series\/(\d+)$/.exec(path);

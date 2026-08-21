@@ -5,7 +5,9 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.json ./
 RUN npm ci
 COPY src ./src
-RUN npx tsc
+COPY scripts ./scripts
+# Fails the build if a client script does not parse.
+RUN npx tsc && node scripts/check-client-js.mjs
 
 FROM node:22-alpine
 WORKDIR /app

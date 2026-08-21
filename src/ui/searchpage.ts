@@ -91,7 +91,7 @@ document.addEventListener('submit', ev => {
   b.disabled = true; b.textContent = 'adding';
   fetch('/add', { method: 'POST', body: new URLSearchParams(new FormData(f)) })
     .then(r => {
-      const id = (r.url.match(/\/series\/(\d+)/) || [])[1];
+      const id = (r.url.split('/series/')[1] || '').split(/[^0-9]/)[0];
       f.outerHTML = id
         ? '<span class="rec">added</span> <a class="series" href="/series/'+id+'">open</a>'
         : '<span class="bad">failed</span>';

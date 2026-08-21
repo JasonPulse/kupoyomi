@@ -4,11 +4,14 @@
   "private": true,
   "type": "module",
   "description": "Owns manga series identity and a source-independent chapter ledger. Uses Suwayomi as a stateless extension runtime.",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/check-client-js.mjs",
     "kupo": "node --enable-source-maps dist/index.js",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "check": "node scripts/check-client-js.mjs"
   },
   "dependencies": {
     "pg": "^8.13.1"

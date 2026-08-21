@@ -77,6 +77,85 @@ const EXTRA = `
 .chip.on{background:#5d8a4a;color:#f2f6ee;border-color:#476b38;font-weight:700}
 `;
 
+const CLIENT = String.raw`
+const params = new URLSearchParams(location.search);
+const url = '/api/browse?source=' + encodeURIComponent(document.body.dataset.source) + '&' + params.toString();
+const el = document.getElementById('results'), status = document.getElementById('status');
+const q = []; let active = 0;
+function detail(id, card) {
+  q.push([id, card]);
+  (function pump(){
+    while (active < 4 && q.length) {
+      const [i, c] = q.shift(); active++;
+      fetch('/api/detail?mangaId='+i).then(r=>r.json()).then(d=>{
+        const n = c.querySelector('.ch');
+        if (d.chapters === null || d.chapters === undefined) { n.textContent = '?'; return; }
+        n.textContent = d.chapters + ' ch';
+        n.className = 'ch ' + (d.chapters === 0 ? 'bad' : d.chapters < 3 ? 'warn' : 'rec');
+        if (d.chapters === 0) { const b = c.querySelector('button'); if (b) { b.disabled = true; b.textContent = 'empty'; } }
+      }).catch(()=>{}).finally(()=>{ active--; pump(); });
+    }
+  })();
+}
+document.addEventListener('submit', ev => {
+  const f = ev.target;
+  if (!f.classList || !f.classList.contains('addf')) return;
+  ev.preventDefault();
+  const b = f.querySelector('button');
+  b.disabled = true; b.textContent = 'adding';
+  fetch('/add', { method: 'POST', body: new URLSearchParams(new FormData(f)) })
+    .then(r => {
+      const id = (r.url.split('/series/')[1] || '').split(/[^0-9]/)[0];
+      f.outerHTML = id ? '<a class="series" href="/series/'+id+'">added &rarr;</a>' : '<span class="bad">failed</span>';
+    })
+    .catch(() => { b.disabled = false; b.textContent = 'retry'; });
+});
+
+const es = new EventSource(url);
+let n = 0, finished = false;
+status.textContent = 'contacting the source';
+es.addEventListener('start', e => {
+  const d = JSON.parse(e.data);
+  status.textContent = 'reading ' + d.source + ' (' + d.kind.toLowerCase() + ')';
+});
+es.addEventListener('page', e => {
+  const d = JSON.parse(e.data);
+  status.textContent = n + ' titles from ' + d.page + ' page' + (d.page===1?'':'s') + (d.more ? ', more available' : '');
+});
+es.addEventListener('failed', e => {
+  const d = JSON.parse(e.data);
+  status.innerHTML = '<span class="bad">this source returned an error: ' + d.message.slice(0,140) + '</span>';
+});
+es.addEventListener('hit', e => {
+  const h = JSON.parse(e.data); n++;
+  const d = document.createElement('div');
+  d.className = 'bt';
+  d.innerHTML = (h.thumb ? '<img loading="lazy" src="'+h.thumb+'">' : '<img>') +
+    '<div class="n">'+h.title.replace(/</g,'&lt;')+'</div>' +
+    '<div class="f"><span class="ch dim">checking</span>' +
+    '<form class="addf" method="post" action="/add"><input type="hidden" name="title" value="'+h.title.replace(/"/g,'&quot;')+'">' +
+    '<input type="hidden" name="sourceId" value="'+h.sourceId+'">' +
+    '<input type="hidden" name="sourceName" value="'+h.sourceName.replace(/"/g,'&quot;')+'">' +
+    '<input type="hidden" name="url" value="'+h.url.replace(/"/g,'&quot;')+'">' +
+    '<button type="submit">add</button></form></div>';
+  el.appendChild(d);
+  detail(h.mangaId, d);
+  status.textContent = n + ' titles';
+});
+es.addEventListener('done', () => {
+  finished = true; es.close();
+  if (n === 0 && !status.innerHTML.includes('error')) {
+    status.innerHTML = '<span class="warn">this source has no browsable listing</span> — ' +
+      'some sources only answer searches. <a href="/search">Search instead</a>, or pick another source.';
+  } else if (n > 0) { status.textContent = n + ' titles'; }
+});
+// A silent onerror was why the page sat on 'loading' whenever anything went wrong.
+es.onerror = () => {
+  es.close();
+  if (!finished) status.innerHTML = '<span class="bad">lost the connection to the server</span>';
+};
+`;
+
 export async function browseSource(sourceId: string, type: string, filters: string[]): Promise<string> {
   const src = await sourceFilters(sourceId);
   const active = new Set(filters);
@@ -113,6 +192,7 @@ export async function browseSource(sourceId: string, type: string, filters: stri
 
   return page("browse", esc(src.displayName),
     `<style>${EXTRA}</style>
+     <script>document.body.dataset.source=${JSON.stringify(sourceId)};</script>
      <div class="card">
        <div class="title">${esc(src.displayName)}</div>
        <div class="chips">${tab("POPULAR", "Popular")}${src.supportsLatest ? tab("LATEST", "Latest") : ""}
@@ -121,84 +201,7 @@ export async function browseSource(sourceId: string, type: string, filters: stri
      </div>
      <div class="card"><span class="dim" id="status">loading</span></div>
      <div class="grid2" id="results"></div>
-     <script>
-     const params = new URLSearchParams(location.search);
-     const url = '/api/browse?source=' + encodeURIComponent(${JSON.stringify(sourceId)}) + '&' + params.toString();
-     const el = document.getElementById('results'), status = document.getElementById('status');
-     const q = []; let active = 0;
-     function detail(id, card) {
-       q.push([id, card]);
-       (function pump(){
-         while (active < 4 && q.length) {
-           const [i, c] = q.shift(); active++;
-           fetch('/api/detail?mangaId='+i).then(r=>r.json()).then(d=>{
-             const n = c.querySelector('.ch');
-             if (d.chapters === null || d.chapters === undefined) { n.textContent = '?'; return; }
-             n.textContent = d.chapters + ' ch';
-             n.className = 'ch ' + (d.chapters === 0 ? 'bad' : d.chapters < 3 ? 'warn' : 'rec');
-             if (d.chapters === 0) { const b = c.querySelector('button'); if (b) { b.disabled = true; b.textContent = 'empty'; } }
-           }).catch(()=>{}).finally(()=>{ active--; pump(); });
-         }
-       })();
-     }
-     document.addEventListener('submit', ev => {
-       const f = ev.target;
-       if (!f.classList || !f.classList.contains('addf')) return;
-       ev.preventDefault();
-       const b = f.querySelector('button');
-       b.disabled = true; b.textContent = 'adding';
-       fetch('/add', { method: 'POST', body: new URLSearchParams(new FormData(f)) })
-         .then(r => {
-           const id = (r.url.match(/\/series\/(\d+)/) || [])[1];
-           f.outerHTML = id ? '<a class="series" href="/series/'+id+'">added &rarr;</a>' : '<span class="bad">failed</span>';
-         })
-         .catch(() => { b.disabled = false; b.textContent = 'retry'; });
-     });
-
-     const es = new EventSource(url);
-     let n = 0, finished = false;
-     status.textContent = 'contacting the source';
-     es.addEventListener('start', e => {
-       const d = JSON.parse(e.data);
-       status.textContent = 'reading ' + d.source + ' (' + d.kind.toLowerCase() + ')';
-     });
-     es.addEventListener('page', e => {
-       const d = JSON.parse(e.data);
-       status.textContent = n + ' titles from ' + d.page + ' page' + (d.page===1?'':'s') + (d.more ? ', more available' : '');
-     });
-     es.addEventListener('failed', e => {
-       const d = JSON.parse(e.data);
-       status.innerHTML = '<span class="bad">this source returned an error: ' + d.message.slice(0,140) + '</span>';
-     });
-     es.addEventListener('hit', e => {
-       const h = JSON.parse(e.data); n++;
-       const d = document.createElement('div');
-       d.className = 'bt';
-       d.innerHTML = (h.thumb ? '<img loading="lazy" src="'+h.thumb+'">' : '<img>') +
-         '<div class="n">'+h.title.replace(/</g,'&lt;')+'</div>' +
-         '<div class="f"><span class="ch dim">checking</span>' +
-         '<form class="addf" method="post" action="/add"><input type="hidden" name="title" value="'+h.title.replace(/"/g,'&quot;')+'">' +
-         '<input type="hidden" name="sourceId" value="'+h.sourceId+'">' +
-         '<input type="hidden" name="sourceName" value="'+h.sourceName.replace(/"/g,'&quot;')+'">' +
-         '<input type="hidden" name="url" value="'+h.url.replace(/"/g,'&quot;')+'">' +
-         '<button type="submit">add</button></form></div>';
-       el.appendChild(d);
-       detail(h.mangaId, d);
-       status.textContent = n + ' titles';
-     });
-     es.addEventListener('done', () => {
-       finished = true; es.close();
-       if (n === 0 && !status.innerHTML.includes('error')) {
-         status.innerHTML = '<span class="warn">this source has no browsable listing</span> — ' +
-           'some sources only answer searches. <a href="/search">Search instead</a>, or pick another source.';
-       } else if (n > 0) { status.textContent = n + ' titles'; }
-     });
-     // A silent onerror was why the page sat on 'loading' whenever anything went wrong.
-     es.onerror = () => {
-       es.close();
-       if (!finished) status.innerHTML = '<span class="bad">lost the connection to the server</span>';
-     };
-     </script>`);
+     <script>${CLIENT}</script>`);
 }
 
 /**

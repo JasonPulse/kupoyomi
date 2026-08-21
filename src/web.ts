@@ -1,5 +1,6 @@
 import { db } from "./db.js";
 import { confirmCandidate } from "./confirm.js";
+import { fmt } from "./held.js";
 
 const esc = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -25,21 +26,27 @@ a{color:#6ab}
 
 type CandRow = {
   id: number; folder: string; dead_source: string | null; file_count: number; resolved_title: string | null;
+  held_count: number | null; held_lo: string | null; held_hi: string | null;
 };
 type CmpRow = {
-  candidate_id: number; manga_id: number; source_name: string; chapters: number;
+  candidate_id: number; manga_id: number; source_name: string; source_url: string | null; chapters: number;
   range_lo: string | null; range_hi: string | null; gaps: number;
   latest: Array<{ chapter: number | null; uploaded: string; scanlator: string | null }>; note: string | null;
+  new_count: number | null; lost_count: number | null; last_upload: string | null;
 };
 
 export async function reviewPage(): Promise<string> {
   const p = db();
   const cands = (await p.query<CandRow>(
-    `SELECT id, folder, dead_source, file_count, resolved_title FROM import_candidate
-      WHERE confirmed_series_id IS NULL ORDER BY file_count DESC`)).rows;
+    `SELECT id, folder, dead_source, file_count, resolved_title, held_count, held_lo, held_hi
+       FROM import_candidate WHERE confirmed_series_id IS NULL ORDER BY file_count DESC`)).rows;
+  // A source with no chapters is noise: DMCA'd entries keep the title and lose the
+  // content, so they match on name and are worthless as a home.
   const cmps = (await p.query<CmpRow>(
-    `SELECT candidate_id, manga_id, source_name, chapters, range_lo, range_hi, gaps, latest, note
-       FROM candidate_comparison ORDER BY chapters DESC`)).rows;
+    `SELECT candidate_id, manga_id, source_name, source_url, chapters, range_lo, range_hi, gaps,
+            latest, note, new_count, lost_count, last_upload
+       FROM candidate_comparison WHERE chapters > 0
+      ORDER BY new_count DESC NULLS LAST, lost_count ASC NULLS LAST`)).rows;
   const done = (await p.query<{ n: string }>("SELECT count(*) n FROM import_candidate WHERE confirmed_series_id IS NOT NULL")).rows[0];
   const led = (await p.query<{ s: string; c: string }>(
     "SELECT (SELECT count(*) FROM series) s, (SELECT count(*) FROM chapter) c")).rows[0];
@@ -53,32 +60,46 @@ export async function reviewPage(): Promise<string> {
   const cards = cands.map((k) => {
     const opts = byCand.get(k.id) ?? [];
     const title = k.resolved_title ?? k.folder;
-    // Recommendation, not a decision: a source holding less than you already own
-    // would strand you again, so it is called out rather than hidden.
-    const best = opts.filter((o) => o.chapters > 0).sort((a, b) => b.chapters - a.chapters)[0];
+    const yours = k.held_count
+      ? `you hold <b>${k.held_count}</b> chapters, ${fmt(k.held_lo)}&ndash;${fmt(k.held_hi)}`
+      : `${k.file_count} files, range not yet computed`;
+
+    // Best is the one that adds the most without losing anything. Adding chapters is
+    // the point; losing chapters you already own is the thing to avoid.
+    const best = [...opts].sort((a, b) =>
+      (b.new_count ?? 0) - (a.new_count ?? 0) || (a.lost_count ?? 0) - (b.lost_count ?? 0))[0];
+
+    // Same source can appear twice: sites carry duplicate entries for one series, so
+    // the url is the only thing that tells them apart.
+    const dupNames = new Set(opts.map((o) => o.source_name)
+      .filter((n, i, a) => a.indexOf(n) !== i));
+
     const rows = opts.length === 0
-      ? `<tr><td colspan="5" class="dim">no exact-title match on any live source</td></tr>`
+      ? `<tr><td colspan="6" class="dim">no live source carries this &mdash; needs a wider search</td></tr>`
       : opts.map((o) => {
-          const strong = o.chapters >= k.file_count * 0.8;
-          const cls = o.chapters === 0 ? "bad" : strong ? "rec" : "";
-          const latest = (o.latest ?? []).slice(0, 3)
-            .map((l) => `ch ${l.chapter ?? "?"}  ${l.uploaded}  ${l.scanlator ?? "-"}`).join("\n");
+          const adds = o.new_count ?? 0, loses = o.lost_count ?? 0;
+          const good = adds > 0 && loses === 0;
+          const slug = dupNames.has(o.source_name) && o.source_url
+            ? `<div class="dim" style="font-size:11px">${esc(o.source_url.slice(0, 44))}</div>` : "";
+          const groups = [...new Set((o.latest ?? []).map((l) => l.scanlator).filter(Boolean))].join(", ");
           return `<tr>
-            <td class="${cls}">${esc(o.source_name)}${o === best && strong ? " &larr; recommended" : ""}</td>
-            <td class="${cls}">${o.chapters}</td>
-            <td class="dim">${o.range_lo ?? "-"}&ndash;${o.range_hi ?? "-"}</td>
-            <td class="dim">${o.gaps}</td>
-            <td class="latest">${esc(latest || o.note || "")}</td>
+            <td class="${good ? "rec" : ""}">${esc(o.source_name)}${o === best ? " &larr; best" : ""}${slug}</td>
+            <td>${fmt(o.range_lo)}&ndash;${fmt(o.range_hi)} <span class="dim">(${o.chapters})</span></td>
+            <td class="${adds > 0 ? "rec" : "dim"}"><b>+${adds}</b></td>
+            <td class="${loses > 0 ? "bad" : "dim"}">${loses > 0 ? `-${loses}` : "0"}</td>
+            <td class="dim">${o.last_upload ? esc(String(o.last_upload).slice(0, 10)) : "-"}${
+              groups ? `<div class="latest">${esc(groups.slice(0, 40))}</div>` : ""}</td>
             <td><form method="post" action="/confirm">
               <input type="hidden" name="id" value="${k.id}">
               <input type="hidden" name="pick" value="${o.manga_id}">
-              <button class="${strong ? "" : "weak"}" type="submit">use this</button>
+              <button class="${good ? "" : "weak"}" type="submit">use this</button>
             </form></td></tr>`;
         }).join("");
+
     return `<div class="card">
       <div class="title">${esc(title)}</div>
-      <div class="meta">${k.file_count} files stranded under ${esc(k.dead_source ?? "-")}</div>
-      <table><tr><th>source</th><th>chapters</th><th>range</th><th>gaps</th><th>recent uploads</th><th></th></tr>
+      <div class="meta">${yours} &middot; stranded under ${esc(k.dead_source ?? "-")}</div>
+      <table><tr><th>source</th><th>their range</th><th>adds</th><th>loses</th><th>last upload</th><th></th></tr>
       ${rows}</table></div>`;
   }).join("");
 

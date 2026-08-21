@@ -1,27 +1,37 @@
 import { db } from "./db.js";
 import { compare, resolveManga } from "./match.js";
+import { heldChapterNumbers } from "./held.js";
 import { canonical } from "./seed.js";
 import type { Candidate } from "./match.js";
 
 type Row = {
   id: number; folder: string; dead_source: string | null; file_count: number;
   resolved_title: string | null; match_kind: string; candidates: Candidate[];
+  suwayomi_manga_id: number | null;
 };
 
 /** Persists one comparison so the review page can load without touching a source. */
 const cache = async (
   candidateId: number, c: Candidate, chapters: number,
-  lo: number | null, hi: number | null, gaps: number, latest: unknown, note: string | null,
+  lo: number | null, hi: number | null, gaps: number,
+  latest: Array<{ chapter: number | null; uploaded: string; scanlator: string | null }>,
+  note: string | null, offered: number[], held: Set<number>,
 ): Promise<void> => {
+  const newCount = offered.filter((n) => !held.has(n)).length;
+  const lostCount = [...held].filter((n) => !offered.includes(n)).length;
+  const lastUpload = latest.map((l) => l.uploaded).sort().at(-1) ?? null;
   await db().query(
     `INSERT INTO candidate_comparison
-       (candidate_id, manga_id, source_name, source_id, source_url, chapters, range_lo, range_hi, gaps, latest, note, checked_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
+       (candidate_id, manga_id, source_name, source_id, source_url, chapters, range_lo, range_hi,
+        gaps, latest, note, new_count, lost_count, last_upload, checked_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, now())
      ON CONFLICT (candidate_id, manga_id) DO UPDATE SET
        chapters = EXCLUDED.chapters, range_lo = EXCLUDED.range_lo, range_hi = EXCLUDED.range_hi,
-       gaps = EXCLUDED.gaps, latest = EXCLUDED.latest, note = EXCLUDED.note, checked_at = now()`,
+       gaps = EXCLUDED.gaps, latest = EXCLUDED.latest, note = EXCLUDED.note,
+       new_count = EXCLUDED.new_count, lost_count = EXCLUDED.lost_count,
+       last_upload = EXCLUDED.last_upload, checked_at = now()`,
     [candidateId, c.mangaId, c.sourceName, c.sourceId, c.url ?? null, chapters, lo, hi, gaps,
-     JSON.stringify(latest), note]);
+     JSON.stringify(latest), note, newCount, lostCount, lastUpload]);
 };
 
 /**
@@ -31,7 +41,7 @@ const cache = async (
  */
 export async function listCandidates(opts: { id?: number } = {}): Promise<void> {
   const rows = (await db().query<Row>(
-    `SELECT id, folder, dead_source, file_count, resolved_title, match_kind, candidates
+    `SELECT id, folder, dead_source, file_count, resolved_title, match_kind, candidates, suwayomi_manga_id
        FROM import_candidate
       WHERE confirmed_series_id IS NULL ${opts.id ? "AND id = $1" : ""}
       ORDER BY file_count DESC`, opts.id ? [opts.id] : [])).rows;
@@ -40,6 +50,14 @@ export async function listCandidates(opts: { id?: number } = {}): Promise<void> 
 
   for (const r of rows) {
     const title = r.resolved_title ?? r.folder;
+    // What we already hold, so every candidate can be judged against it rather than
+    // in the abstract. Stored once per candidate.
+    const heldNums = await heldChapterNumbers(r.dead_source ?? "", r.folder, r.suwayomi_manga_id);
+    const held = new Set(heldNums);
+    await db().query(
+      `UPDATE import_candidate SET held_count=$1, held_lo=$2, held_hi=$3, held_numbers=$4 WHERE id=$5`,
+      [heldNums.length, heldNums[0] ?? null, heldNums.at(-1) ?? null, JSON.stringify(heldNums), r.id]);
+    console.log(`     you hold ${heldNums.length} chapters (${heldNums[0] ?? "-"}-${heldNums.at(-1) ?? "-"})`);
     console.log(`\n[${r.id}] ${title}`);
     console.log(`     ${r.file_count} files stranded under ${r.dead_source ?? "-"}`);
     if (r.candidates.length === 0) {
@@ -55,12 +73,13 @@ export async function listCandidates(opts: { id?: number } = {}): Promise<void> 
         cmp = await compare(localId);
       } catch (err) {
         const note = err instanceof Error ? err.message : String(err);
-        await cache(r.id, c, 0, null, null, 0, [], note);
+        await cache(r.id, c, 0, null, null, 0, [], note, [], held);
         console.log(`     --pick ${String(c.mangaId).padEnd(6)} ${c.sourceName.padEnd(20)} UNAVAILABLE (${note})`);
         continue;
       }
       await cache(r.id, c, cmp.chapters, cmp.range?.[0] ?? null, cmp.range?.[1] ?? null,
-        cmp.missing.length, cmp.latest, cmp.chapters === 0 ? "no chapters" : null);
+        cmp.missing.length, cmp.latest, cmp.chapters === 0 ? "no chapters" : null,
+        cmp.offered, held);
       if (cmp.chapters === 0) {
         console.log(`     --pick ${String(c.mangaId).padEnd(6)} ${c.sourceName.padEnd(20)} no chapters -- useless as a home`);
         continue;
@@ -84,7 +103,7 @@ export async function listCandidates(opts: { id?: number } = {}): Promise<void> 
 export async function confirmCandidate(id: number, mangaId: number): Promise<void> {
   const p = db();
   const row = (await p.query<Row>(
-    "SELECT id, folder, dead_source, file_count, resolved_title, match_kind, candidates FROM import_candidate WHERE id = $1",
+    "SELECT id, folder, dead_source, file_count, resolved_title, match_kind, candidates, suwayomi_manga_id FROM import_candidate WHERE id = $1",
     [id])).rows[0];
   if (!row) throw new Error(`no candidate ${id}`);
   const pick = row.candidates.find((c) => c.mangaId === mangaId);

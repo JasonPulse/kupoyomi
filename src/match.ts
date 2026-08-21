@@ -116,6 +116,7 @@ export async function compare(mangaId: number) {
   }
   const dated = d.manga.chapters.nodes.filter((c) => c.uploadDate).sort((a, b) => Number(a.uploadDate) - Number(b.uploadDate));
   return {
+    offered: nums,
     source: d.manga.source?.displayName ?? "-",
     title: d.manga.title,
     chapters: d.manga.chapters.totalCount,

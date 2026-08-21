@@ -6,7 +6,8 @@ const CSS = `
 body{font:14px/1.5 -apple-system,system-ui,sans-serif;margin:0;background:#111;color:#ddd}
 header{padding:10px 20px;background:#1b1b1b;border-bottom:1px solid #333;position:sticky;top:0;z-index:5;
   display:flex;gap:18px;align-items:baseline;flex-wrap:wrap}
-header h1{font-size:15px;margin:0;font-weight:600;color:#eee}
+header h1{font-size:15px;margin:0;font-weight:600;color:#eee;display:flex;align-items:center;gap:8px}
+header h1 img{border-radius:50%;display:block}
 nav a{color:#8ab;text-decoration:none;font-size:13px;padding:3px 0;border-bottom:2px solid transparent}
 nav a:hover{color:#cde}
 nav a.on{color:#fff;border-bottom-color:#2b6}
@@ -42,8 +43,10 @@ export function page(active: Nav, subtitle: string, body: string): string {
   const link = (id: Nav, href: string, label: string): string =>
     `<a href="${href}" class="${id === active ? "on" : ""}">${label}</a>`;
   return `<!doctype html><html><head><meta charset="utf-8"><title>Kupoyomi</title>
-<meta name="viewport" content="width=device-width,initial-scale=1"><style>${CSS}</style></head><body>
-<header><h1>Kupoyomi</h1><nav>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/favicon.ico"><link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<style>${CSS}</style></head><body>
+<header><h1><img src="/icon-192.png" alt="" width="26" height="26">Kupoyomi</h1><nav>
   ${link("library", "/", "Library")}
   ${link("browse", "/browse", "Browse")}
   ${link("search", "/search", "Search")}

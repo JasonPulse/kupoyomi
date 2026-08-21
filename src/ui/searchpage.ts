@@ -32,13 +32,14 @@ function render(g) {
     '<table class="srcs"><tr><th>source</th><th>chapters</th><th>latest</th><th></th></tr>' +
     best.map(r => {
       const known = r.chapters !== undefined && r.chapters !== null;
-      const weak = known && r.chapters < 3;
+      const empty = known && r.chapters === 0;   // one chapter is a real new series, zero is nothing
+      const thin = known && r.chapters > 0 && r.chapters < 3;
       return '<tr>' +
         '<td>'+r.sourceName+(r.nsfw?' <span class="dim">18+</span>':'')+'</td>' +
-        '<td class="'+(weak?'bad':known?'rec':'dim')+'">'+(known ? r.chapters : '<span class="spin">checking</span>')+'</td>' +
+        '<td class="'+(empty?'bad':thin?'warn':known?'rec':'dim')+'">'+(known ? r.chapters : '<span class="spin">checking</span>')+'</td>' +
         '<td class="dim">'+(r.lastUpload || '-')+'</td>' +
-        '<td class="act">' + (weak
-          ? '<span class="dim" title="this source carries almost nothing">too few</span>'
+        '<td class="act">' + (empty
+          ? '<span class="dim" title="this source lists the series but carries no chapters">empty</span>'
           : '<form method="post" action="/add">' +
             '<input type="hidden" name="title" value="'+r.title.replace(/"/g,'&quot;')+'">' +
             '<input type="hidden" name="sourceId" value="'+r.sourceId+'">' +
@@ -86,10 +87,10 @@ es.onerror = () => { es.close(); status.textContent += ' — connection ended'; 
 `;
 
 const EXTRA_CSS = `
-.srch-head{display:flex;gap:12px;margin-bottom:10px}
-.cover{width:64px;height:92px;object-fit:cover;border-radius:4px;background:#242424;flex:0 0 auto}
+.srch-head{display:flex;gap:16px;margin-bottom:12px;align-items:flex-start}
+.cover{width:190px;height:272px;object-fit:cover;border-radius:4px;background:#242424;flex:0 0 auto}
 .srch-body{min-width:0}
-.desc{color:#999;font-size:12px;margin-top:5px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.desc{color:#999;font-size:12.5px;margin-top:7px;display:-webkit-box;-webkit-line-clamp:8;-webkit-box-orient:vertical;overflow:hidden}
 table.srcs th:nth-child(2),table.srcs td:nth-child(2){width:88px}
 table.srcs th:nth-child(3),table.srcs td:nth-child(3){width:110px}
 table.srcs th:nth-child(4),table.srcs td:nth-child(4){width:96px;text-align:right}

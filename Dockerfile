@@ -14,6 +14,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY db ./db
+COPY assets ./assets
 USER node
 ENTRYPOINT ["node", "--enable-source-maps", "dist/index.js"]
 CMD ["report"]

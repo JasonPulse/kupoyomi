@@ -10,6 +10,7 @@ import { seriesPage } from "./ui/series.js";
 import { queuePage } from "./ui/queue.js";
 import { browseIndex, browseSource, streamBrowse } from "./ui/browse.js";
 import { extensionsPage, setExtension } from "./ui/extensions.js";
+import { ASSETS } from "./ui/assets.js";
 import { scanWanted } from "./fetch.js";
 import { startScheduler, state as schedState, checkStalled } from "./schedule.js";
 
@@ -128,6 +129,13 @@ export async function serve(): Promise<void> {
     const redirect = (to: string): void => { res.writeHead(303, { location: to }); res.end(); };
 
     if (path === "/healthz") return send(200, { ok: true });
+
+    const asset = ASSETS[path];
+    if (asset) {
+      res.writeHead(200, { "content-type": asset.type, "cache-control": "public, max-age=86400" });
+      res.end(asset.body);
+      return;
+    }
 
     // Covers are served by Suwayomi, whose paths mean nothing to a browser pointed at
     // us, so they are proxied. Cached hard: a cover for a given manga does not change.

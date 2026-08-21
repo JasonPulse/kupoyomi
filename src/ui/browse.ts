@@ -64,10 +64,10 @@ export async function browseIndex(): Promise<string> {
 }
 
 const EXTRA = `
-.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:14px}
 .bt{background:#1a1a1a;border:1px solid #2e2e2e;border-radius:6px;overflow:hidden}
 .bt img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#222}
-.bt .n{padding:7px 8px;font-size:12px;line-height:1.35;height:56px;overflow:hidden}
+.bt .n{padding:8px 9px;font-size:13px;line-height:1.35;height:58px;overflow:hidden}
 .bt .f{padding:0 8px 8px;display:flex;justify-content:space-between;align-items:center;font-size:11px}
 .chips{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}
 .chip{font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid #3a3a3a;color:#bbb;text-decoration:none}
@@ -132,8 +132,8 @@ export async function browseSource(sourceId: string, type: string, filters: stri
              const n = c.querySelector('.ch');
              if (d.chapters === null || d.chapters === undefined) { n.textContent = '?'; return; }
              n.textContent = d.chapters + ' ch';
-             n.className = 'ch ' + (d.chapters < 3 ? 'bad' : 'rec');
-             if (d.chapters < 3) { const b = c.querySelector('button'); if (b) { b.disabled = true; b.textContent = 'too few'; } }
+             n.className = 'ch ' + (d.chapters === 0 ? 'bad' : d.chapters < 3 ? 'warn' : 'rec');
+             if (d.chapters === 0) { const b = c.querySelector('button'); if (b) { b.disabled = true; b.textContent = 'empty'; } }
            }).catch(()=>{}).finally(()=>{ active--; pump(); });
          }
        })();

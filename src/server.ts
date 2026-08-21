@@ -13,6 +13,7 @@ import { browseIndex, browseSource, streamBrowse } from "./ui/browse.js";
 import { extensionsPage, setExtension } from "./ui/extensions.js";
 import { ASSETS } from "./ui/assets.js";
 import { refreshMetadata } from "./metadata.js";
+import { listSeries, getSeries, getChapters, getPages, getPage, setProgress } from "./pbapi.js";
 import { createReadStream } from "node:fs";
 import { scanWanted } from "./fetch.js";
 import { startScheduler, state as schedState, checkStalled } from "./schedule.js";
@@ -160,6 +161,57 @@ export async function serve(): Promise<void> {
     if (path === "/api/stats") {
       stats().then((s) => send(200, s)).catch((e: unknown) =>
         send(503, { error: e instanceof Error ? e.message : String(e) }));
+      return;
+    }
+
+    // The Paperback extension's API. Kept under one prefix so it is obvious what is
+    // public contract and what is internal to the web UI.
+    if (path.startsWith("/api/pb/")) {
+      const pb = async (): Promise<void> => {
+        const parts = path.split("/").filter(Boolean).slice(2);   // after api/pb
+        if (parts[0] === "series" && parts.length === 1) return send(200, await listSeries(url.searchParams.get("q") ?? undefined));
+        if (parts[0] === "series" && parts[1] && parts.length === 2) {
+          const s = await getSeries(Number(parts[1]));
+          return s ? send(200, s) : send(404, { error: "no such series" });
+        }
+        if (parts[0] === "series" && parts[1] && parts[2] === "chapters") {
+          return send(200, await getChapters(Number(parts[1])));
+        }
+        if (parts[0] === "chapter" && parts[1] && parts[2]) {
+          const pages = await getPages(Number(parts[1]), decodeURIComponent(parts[2]));
+          return pages ? send(200, { pages }) : send(404, { error: "no such chapter" });
+        }
+        if (parts[0] === "page" && parts[1] && parts[2] && parts[3] !== undefined) {
+          const img = await getPage(Number(parts[1]), decodeURIComponent(parts[2]), Number(parts[3]));
+          if (!img) return send(404, { error: "no such page" });
+          res.writeHead(200, { "content-type": img.type, "cache-control": "public, max-age=86400" });
+          res.end(img.body);
+          return;
+        }
+        if (parts[0] === "cover" && parts[1]) {
+          const r = await db().query<{ cover_path: string | null }>(
+            "SELECT cover_path FROM series WHERE id = $1", [Number(parts[1])]);
+          const cp = r.rows[0]?.cover_path;
+          if (!cp) { res.writeHead(404); res.end(); return; }
+          res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "public, max-age=3600" });
+          createReadStream(cp).on("error", () => { res.writeHead(404); res.end(); }).pipe(res);
+          return;
+        }
+        if (parts[0] === "progress" && req.method === "POST") {
+          const body = await readBody(req);
+          const f = new URLSearchParams(body);
+          const j = body.trim().startsWith("{") ? JSON.parse(body) as Record<string, unknown> : null;
+          const seriesId = Number(j?.["seriesId"] ?? f.get("seriesId"));
+          const chapter = String(j?.["chapter"] ?? f.get("chapter") ?? "");
+          const page = Number(j?.["page"] ?? f.get("page") ?? 0);
+          const completed = String(j?.["completed"] ?? f.get("completed") ?? "false") === "true";
+          if (!Number.isInteger(seriesId) || !chapter) return send(400, { error: "seriesId and chapter required" });
+          await setProgress(seriesId, chapter, page, completed);
+          return send(200, { ok: true });
+        }
+        return send(404, { error: "unknown endpoint" });
+      };
+      pb().catch((e: unknown) => send(500, { error: e instanceof Error ? e.message : String(e) }));
       return;
     }
 

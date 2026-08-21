@@ -2,7 +2,12 @@ import { db } from "./db.js";
 import { scanLegacyTree } from "./disk.js";
 import { gql, installedSources, sanitize } from "./suwayomi.js";
 
-export type Candidate = { sourceName: string; sourceId: string; mangaId: number; title: string; matched: "title" | "sanitized" };
+export type Candidate = {
+  sourceName: string; sourceId: string; mangaId: number; title: string;
+  /** Source-relative url. Stable across Suwayomi instances, unlike mangaId. */
+  url?: string;
+  matched: "title" | "sanitized";
+};
 export type Stranded = {
   folder: string;
   deadSource: string;
@@ -15,7 +20,7 @@ export type Stranded = {
 };
 
 const SEARCH = `mutation($src:LongString!,$q:String!){
-  fetchSourceManga(input:{source:$src,type:SEARCH,query:$q,page:1}){ mangas{ id title } } }`;
+  fetchSourceManga(input:{source:$src,type:SEARCH,query:$q,page:1}){ mangas{ id title url } } }`;
 
 export async function findHomes(opts: { only?: string; limit?: number; includeNsfw?: boolean } = {}) {
   const [disk, sources] = await Promise.all([scanLegacyTree(), installedSources()]);
@@ -60,9 +65,9 @@ export async function findHomes(opts: { only?: string; limit?: number; includeNs
     // just immune to '_' standing in for any of \ / : * ? " < > |.
     const query = s.exactTitleKnown ? s.title : s.title.replace(/_/g, " ");
     for (const src of pool) {
-      let hits: Array<{ id: number; title: string }>;
+      let hits: Array<{ id: number; title: string; url: string }>;
       try {
-        hits = (await gql<{ fetchSourceManga: { mangas: Array<{ id: number; title: string }> } }>(
+        hits = (await gql<{ fetchSourceManga: { mangas: Array<{ id: number; title: string; url: string }> } }>(
           SEARCH, { src: src.id, q: query })).fetchSourceManga.mangas;
       } catch {
         continue;   // a dead or rate-limited source is not a reason to abandon the sweep
@@ -72,7 +77,7 @@ export async function findHomes(opts: { only?: string; limit?: number; includeNs
         const bySanitized = sanitize(m.title) === s.folder;
         if (!byTitle && !bySanitized) continue;   // 100% match only, never fuzzy
         s.candidates.push({
-          sourceName: src.displayName, sourceId: src.id, mangaId: m.id,
+          sourceName: src.displayName, sourceId: src.id, mangaId: m.id, url: m.url,
           title: m.title, matched: byTitle ? "title" : "sanitized",
         });
       }
@@ -121,4 +126,18 @@ export async function compare(mangaId: number) {
       uploaded: new Date(Number(c.uploadDate)).toISOString().slice(0, 10),
     })),
   };
+}
+
+
+/**
+ * Resolves a stable (source, url) pair to a manga id on whichever Suwayomi we are
+ * talking to now. Searching by title and matching on url is deterministic and does
+ * not care that the instance was rebuilt from scratch.
+ */
+export async function resolveManga(sourceId: string, title: string, url: string): Promise<number> {
+  const hits = (await gql<{ fetchSourceManga: { mangas: Array<{ id: number; title: string; url: string }> } }>(
+    SEARCH, { src: sourceId, q: title })).fetchSourceManga.mangas;
+  const exact = hits.find((m) => m.url === url);
+  if (!exact) throw new Error(`source ${sourceId} no longer returns ${url} when searching "${title}"`);
+  return exact.id;
 }

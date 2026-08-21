@@ -5,6 +5,7 @@ import { snapshot } from "./snapshot.js";
 import { seedLedger } from "./seed.js";
 import { listCandidates, confirmCandidate } from "./confirm.js";
 import { remap } from "./remap.js";
+import { backfillUrls } from "./backfill.js";
 import { serve } from "./server.js";
 
 const usage = `kupoyomi <command>
@@ -81,6 +82,10 @@ const main = async (): Promise<void> => {
       await closeDb();
       break;
     }
+    case "backfill-urls":
+      await backfillUrls();
+      await closeDb();
+      break;
     case "seed":
       await seedLedger();
       await closeDb();

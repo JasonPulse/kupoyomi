@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { db } from "./db.js";
 import { canonical } from "./seed.js";
 import { gql, sanitize } from "./suwayomi.js";
+import { resolveManga } from "./match.js";
 
 /**
  * Canonical chapter filename: "{Series} - c0070 [Group].cbz". Zero-padded so a plain
@@ -34,19 +35,28 @@ export async function remap(seriesId: number, opts: { dryRun?: boolean } = {}): 
     "SELECT id, title, folder FROM series WHERE id = $1", [seriesId])).rows[0];
   if (!series) throw new Error(`no series ${seriesId}`);
 
-  const binding = (await p.query<{ id: number; source_name: string; source_manga_id: number }>(
-    "SELECT id, source_name, source_manga_id FROM series_binding WHERE series_id = $1 AND role = 'primary'",
+  const binding = (await p.query<{ id: number; source_id: string; source_name: string; source_manga_id: number; source_url: string | null }>(
+    "SELECT id, source_id, source_name, source_manga_id, source_url FROM series_binding WHERE series_id = $1 AND role = 'primary'",
     [seriesId])).rows[0];
   if (!binding) throw new Error(`series ${seriesId} has no primary binding`);
+
+  // Suwayomi row ids do not survive the pod being replaced, so resolve the stable
+  // (source, url) pair against whichever instance is answering now.
+  const mangaId = binding.source_url
+    ? await resolveManga(binding.source_id, series.title, binding.source_url)
+    : binding.source_manga_id;
 
   const cand = (await p.query<{ folder: string; dead_source: string; suwayomi_manga_id: number | null }>(
     "SELECT folder, dead_source, suwayomi_manga_id FROM import_candidate WHERE confirmed_series_id = $1",
     [seriesId])).rows[0];
   if (!cand?.suwayomi_manga_id) throw new Error(`series ${seriesId} has no stranded folder to adopt from`);
 
-  // What the new source offers.
+  // What the new source offers. Primed first: a searched-but-never-opened manga has
+  // a row and no chapter list.
+  await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
+    { id: mangaId }).catch(() => undefined);
   const target = await gql<{ manga: { chapters: { nodes: Array<{ chapterNumber: number | null }> } } }>(
-    `{ manga(id:${binding.source_manga_id}) { chapters { nodes { chapterNumber } } } }`);
+    `{ manga(id:${mangaId}) { chapters { nodes { chapterNumber } } } }`);
   const offered = new Set(
     target.manga.chapters.nodes.map((c) => c.chapterNumber).filter((n): n is number => n !== null));
 

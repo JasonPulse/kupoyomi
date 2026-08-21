@@ -90,10 +90,11 @@ export async function confirmCandidate(id: number, mangaId: number): Promise<voi
       console.log(`  demoted ${existing.source_name} to supplemental`);
     }
     await client.query(
-      `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
-       VALUES ($1,$2,$3,$4,'primary')
-       ON CONFLICT (series_id, source_id, source_manga_id) DO UPDATE SET role = 'primary'`,
-      [seriesId, pick.sourceId, pick.sourceName, pick.mangaId]);
+      `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, source_url, role)
+       VALUES ($1,$2,$3,$4,$5,'primary')
+       ON CONFLICT (series_id, source_id, source_manga_id)
+         DO UPDATE SET role = 'primary', source_url = EXCLUDED.source_url`,
+      [seriesId, pick.sourceId, pick.sourceName, pick.mangaId, pick.url ?? null]);
     await client.query("UPDATE import_candidate SET confirmed_series_id = $1 WHERE id = $2", [seriesId, id]);
     await client.query("COMMIT");
     console.log(`confirmed "${title}" -> ${pick.sourceName} (series ${seriesId})`);

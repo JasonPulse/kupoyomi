@@ -43,6 +43,14 @@ async function notify(title: string, message: string): Promise<void> {
 export async function checkStalled(): Promise<number> {
   const p = db();
   const days = num("STALL_DAYS", 21);
+
+  // The first pass establishes a baseline and stays silent. "Went quiet" means it
+  // changed while we were watching; on a library where 27 of 39 series were already
+  // quiet before this existed, alerting on all of them at once is noise that teaches
+  // you to ignore the channel.
+  const seen = (await p.query<{ value: string }>(
+    "SELECT value FROM settings WHERE key = 'stall_baseline_at'")).rows[0];
+  const baselining = !seen;
   const rows = (await p.query<{ id: number; title: string; last: string | null; alerted: string | null }>(
     `SELECT s.id, s.title, max(c.uploaded_at)::text AS last, s.stall_alerted_at::text AS alerted
        FROM series s LEFT JOIN chapter c ON c.series_id = s.id
@@ -59,12 +67,22 @@ export async function checkStalled(): Promise<number> {
     }
     const upd = await p.query(
       "UPDATE series SET stalled_since = COALESCE(stalled_since, now()) WHERE id = $1 AND stalled_since IS NULL", [r.id]);
+    if (baselining) {
+      // Recorded as already-quiet, so it never produces a retrospective alert.
+      await p.query("UPDATE series SET stall_alerted_at = now() WHERE id = $1", [r.id]);
+      continue;
+    }
     if ((upd.rowCount ?? 0) > 0 && !r.alerted) {
       await notify("Kupoyomi: series went quiet",
         `${r.title} has had no new chapter in ${Math.round(quiet)} days. Its source may have stopped carrying it.`);
       await p.query("UPDATE series SET stall_alerted_at = now() WHERE id = $1", [r.id]);
       flagged++;
     }
+  }
+  if (baselining) {
+    await p.query("INSERT INTO settings (key, value) VALUES ('stall_baseline_at', now()::text) ON CONFLICT (key) DO NOTHING");
+    const quiet = (await p.query<{ n: string }>("SELECT count(*) n FROM series WHERE stalled_since IS NOT NULL")).rows[0];
+    console.log(`baseline established: ${quiet?.n ?? 0} series were already quiet, none alerted`);
   }
   return flagged;
 }

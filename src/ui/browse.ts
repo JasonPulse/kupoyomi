@@ -199,8 +199,10 @@ export async function browseSource(sourceId: string, type: string, filters: stri
          ${active.size > 0 ? `<a class="chip" href="/browse/${encodeURIComponent(sourceId)}?type=${esc(type)}">clear filters</a>` : ""}</div>
        ${chips || '<div class="dim">this source exposes no filters</div>'}
      </div>
-     <div class="card"><span class="dim" id="status">loading</span></div>
-     <div class="grid2" id="results"></div>
+     <div class="card">
+       <div class="dim" id="status" style="margin-bottom:12px">loading</div>
+       <div class="grid2" id="results"></div>
+     </div>
      <script>${CLIENT}</script>`);
 }
 

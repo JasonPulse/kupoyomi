@@ -75,7 +75,7 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
        FROM wanted w
        JOIN series_binding b ON b.id = w.binding_id
        JOIN series s ON s.id = w.series_id
-      WHERE w.state IN ('pending','failed') AND w.attempts < 4
+      WHERE w.state IN ('pending','failed','fetching') AND w.attempts < 4
       ORDER BY s.title, w.chapter_number
       ${opts.limit ? `LIMIT ${Number(opts.limit)}` : ""}`)).rows;
   if (rows.length === 0) { console.log("nothing queued"); return; }
@@ -110,6 +110,12 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
         const pages = (await gql<{ fetchChapterPages: { pages: string[] } }>(
           `mutation($id:Int!){ fetchChapterPages(input:{chapterId:$id}){ pages } }`, { id: ch.id })).fetchChapterPages.pages;
         if (pages.length === 0) throw new Error("chapter has no pages");
+        // Marked in flight with its page count, so the UI can show progress rather
+        // than a chapter vanishing for a minute and reappearing done.
+        await p.query(
+          `UPDATE wanted SET state='fetching', started_at=now(), pages_done=0, pages_total=$3
+            WHERE series_id=$1 AND chapter_number=$2`,
+          [it.series_id, it.chapter_number, pages.length]);
 
         const images: Array<{ name: string; data: Buffer }> = [];
         for (const [i, rel] of pages.entries()) {
@@ -119,6 +125,10 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
           const ext = (res.headers.get("content-type") ?? "").includes("png") ? "png"
             : (res.headers.get("content-type") ?? "").includes("webp") ? "webp" : "jpg";
           images.push({ name: `${String(i + 1).padStart(3, "0")}.${ext}`, data: buf });
+          if (i % 3 === 2 || i === pages.length - 1) {
+            await p.query("UPDATE wanted SET pages_done=$3 WHERE series_id=$1 AND chapter_number=$2",
+              [it.series_id, it.chapter_number, i + 1]);
+          }
         }
 
         const uploaded = ch.uploadDate ? new Date(Number(ch.uploadDate)) : null;

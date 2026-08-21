@@ -8,6 +8,7 @@ import { searchPage } from "./ui/searchpage.js";
 import { streamSearch, mangaDetail } from "./ui/searchstream.js";
 import { seriesPage } from "./ui/series.js";
 import { queuePage } from "./ui/queue.js";
+import { downloadsPage, liveState } from "./ui/downloads.js";
 import { browseIndex, browseSource, streamBrowse } from "./ui/browse.js";
 import { extensionsPage, setExtension } from "./ui/extensions.js";
 import { ASSETS } from "./ui/assets.js";
@@ -178,6 +179,12 @@ export async function serve(): Promise<void> {
       }
       if (path === "/review") return html(reviewPage());
       if (path === "/queue") return html(queuePage());
+      if (path === "/downloads") return html(downloadsPage());
+      if (path === "/api/live") {
+        liveState().then((d) => send(200, d))
+          .catch((e: unknown) => send(503, { error: e instanceof Error ? e.message : String(e) }));
+        return;
+      }
       if (path === "/browse") return html(browseIndex());
       if (path === "/extensions") {
         return html(extensionsPage({

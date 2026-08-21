@@ -37,7 +37,7 @@ a.series{color:#cde;text-decoration:none}a.series:hover{text-decoration:underlin
 .tile .n{font-size:12px;color:#888}
 `;
 
-export type Nav = "library" | "browse" | "search" | "review" | "queue" | "extensions";
+export type Nav = "library" | "browse" | "search" | "review" | "queue" | "downloads" | "extensions";
 
 export function page(active: Nav, subtitle: string, body: string): string {
   const link = (id: Nav, href: string, label: string): string =>
@@ -51,6 +51,7 @@ export function page(active: Nav, subtitle: string, body: string): string {
   ${link("browse", "/browse", "Browse")}
   ${link("search", "/search", "Search")}
   ${link("review", "/review", "Migrations")}
+  ${link("downloads", "/downloads", "Downloading")}
   ${link("queue", "/queue", "Queue")}
   ${link("extensions", "/extensions", "Sources")}
 </nav><span class="sub">${subtitle}</span></header>

@@ -15,6 +15,11 @@ export const ASSETS: Record<string, { body: Buffer; type: string } | undefined> 
     ["/icon-192.png", "icon-192.png", "image/png"],
     ["/icon-512.png", "icon-512.png", "image/png"],
     ["/apple-touch-icon.png", "apple-touch-icon.png", "image/png"],
+    ["/newstop.png", "newstop.png", "image/png"],
+    ["/newsmiddle.png", "newsmiddle.png", "image/png"],
+    ["/newsbottom.png", "newsbottom.png", "image/png"],
+    ["/newsheader.png", "newsheader.png", "image/png"],
+    ["/arrows.png", "arrows.png", "image/png"],
   ] as const).flatMap(([route, file, type]) => {
     const body = load(file);
     return body ? [[route, { body, type }] as const] : [];

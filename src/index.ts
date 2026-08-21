@@ -2,6 +2,7 @@ import { report } from "./report.js";
 import { findHomes, compare } from "./match.js";
 import { migrate, stageCandidates, closeDb } from "./db.js";
 import { snapshot } from "./snapshot.js";
+import { seedLedger } from "./seed.js";
 import { serve } from "./server.js";
 
 const usage = `kupoyomi <command>
@@ -12,6 +13,7 @@ const usage = `kupoyomi <command>
   migrate                    apply db/*.sql (needs DATABASE_URL)
   import [--limit N]         find homes and stage them for confirmation
   snapshot                   freeze the old Suwayomi's state before it is torn down
+  seed                       build the ledger from the snapshot
   serve                      http api + extension bootstrap (long running)
 
 report, find and compare are read-only.
@@ -53,6 +55,10 @@ const main = async (): Promise<void> => {
       for (const l of c.latest) console.log(`     ch ${String(l.chapter).padStart(7)}  ${l.uploaded}  ${l.scanlator ?? "-"}`);
       break;
     }
+    case "seed":
+      await seedLedger();
+      await closeDb();
+      break;
     case "snapshot":
       await snapshot();
       await closeDb();

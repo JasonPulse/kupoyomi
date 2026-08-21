@@ -11,9 +11,12 @@ export type DiskSeries = {
   sourceDir: string | null;
   folder: string;
   cbzCount: number;
+  /** Actual .cbz basenames present. The ledger is validated against these rather
+   *  than trusting Suwayomi's isDownloaded flag, which drifts from reality. */
+  files: string[];
 };
 
-type Node = { files: number; kids: Map<string, number> };
+type Node = { files: string[]; kids: Map<string, string[]> };
 
 /**
  * Series folders contain '[', ']' and '*'. Shell globs and `find -path` read those
@@ -72,7 +75,7 @@ export async function scanLegacyTree(): Promise<DiskSeries[]> {
   const tree = new Map<string, Node>();
   const node = (name: string): Node => {
     let n = tree.get(name);
-    if (!n) { n = { files: 0, kids: new Map() }; tree.set(name, n); }
+    if (!n) { n = { files: [], kids: new Map() }; tree.set(name, n); }
     return n;
   };
 
@@ -83,11 +86,11 @@ export async function scanLegacyTree(): Promise<DiskSeries[]> {
     if (depth === 1) node(top);
     else if (depth === 2) {
       const n = node(top);
-      if (kind === "f") { if (path.endsWith(".cbz")) n.files++; }
-      else if (parts[1]) n.kids.set(parts[1], n.kids.get(parts[1]) ?? 0);
-    } else if (depth === 3 && kind === "f" && parts[1]) {
+      if (kind === "f") { if (path.endsWith(".cbz") && parts[1]) n.files.push(parts[1]); }
+      else if (parts[1]) n.kids.set(parts[1], n.kids.get(parts[1]) ?? []);
+    } else if (depth === 3 && kind === "f" && parts[1] && parts[2]) {
       const n = node(top);
-      if (path.endsWith(".cbz")) n.kids.set(parts[1], (n.kids.get(parts[1]) ?? 0) + 1);
+      if (path.endsWith(".cbz")) (n.kids.get(parts[1]) ?? n.kids.set(parts[1], []).get(parts[1])!).push(parts[2]);
     }
   }
 
@@ -95,10 +98,12 @@ export async function scanLegacyTree(): Promise<DiskSeries[]> {
   for (const [top, info] of tree) {
     // A source folder holds series folders that hold the chapters; a local series
     // folder holds its chapters directly.
-    if (info.kids.size > 0 && info.files === 0) {
-      for (const [series, count] of info.kids) out.push({ sourceDir: top, folder: series, cbzCount: count });
+    if (info.kids.size > 0 && info.files.length === 0) {
+      for (const [series, files] of info.kids) {
+        out.push({ sourceDir: top, folder: series, cbzCount: files.length, files });
+      }
     } else {
-      out.push({ sourceDir: null, folder: top, cbzCount: info.files });
+      out.push({ sourceDir: null, folder: top, cbzCount: info.files.length, files: info.files });
     }
   }
   return out;

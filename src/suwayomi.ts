@@ -17,6 +17,8 @@ export async function gql<T>(query: string, variables: Record<string, unknown> =
 
 export type Source = { id: string; displayName: string; lang: string; isNsfw: boolean };
 export type Chapter = {
+  name: string | null;
+  pageCount: number | null;
   chapterNumber: number | null;
   isDownloaded: boolean;
   scanlator: string | null;
@@ -46,7 +48,7 @@ export const libraryWithChapters = async (): Promise<Array<Manga & { chapters: {
   (await gql<{ mangas: { nodes: Array<Manga & { chapters: { nodes: Chapter[] } }> } }>(
     `{ mangas(condition:{inLibrary:true}) { nodes {
          id title status inLibrary downloadCount source { displayName }
-         chapters { nodes { chapterNumber isDownloaded scanlator uploadDate } } } } }`,
+         chapters { nodes { name pageCount chapterNumber isDownloaded scanlator uploadDate } } } } }`,
   )).mangas.nodes;
 
 /**
@@ -66,7 +68,7 @@ export const installedExtensions = async (): Promise<Extension[]> =>
 
 export const mangaChapters = async (id: number): Promise<Chapter[]> =>
   (await gql<{ manga: { chapters: { nodes: Chapter[] } } }>(
-    `{ manga(id:${id}) { chapters { nodes { chapterNumber isDownloaded scanlator uploadDate } } } }`,
+    `{ manga(id:${id}) { chapters { nodes { name pageCount chapterNumber isDownloaded scanlator uploadDate } } } }`,
   )).manga.chapters.nodes;
 
 /** Installs an extension by package name. This is what replaces logging into the UI. */

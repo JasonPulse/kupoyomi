@@ -44,9 +44,10 @@ export async function snapshot(): Promise<void> {
         [m.id, m.title, m.source?.displayName ?? null, m.status, m.inLibrary, m.downloadCount]);
       for (const c of await mangaChapters(m.id)) {
         await client.query(
-          `INSERT INTO legacy_chapter (suwayomi_manga_id, chapter_number, is_downloaded, scanlator, uploaded_at)
-           VALUES ($1,$2,$3,$4,$5)`,
-          [m.id, c.chapterNumber, c.isDownloaded, c.scanlator,
+          `INSERT INTO legacy_chapter
+             (suwayomi_manga_id, chapter_number, name, page_count, is_downloaded, scanlator, uploaded_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [m.id, c.chapterNumber, c.name, c.pageCount, c.isDownloaded, c.scanlator,
            c.uploadDate ? new Date(Number(c.uploadDate)) : null]);
         chapters++;
       }

@@ -5,8 +5,8 @@ import { fmt, ago } from "../held.js";
 export async function seriesPage(id: number): Promise<string> {
   const p = db();
   const today = (await p.query<{ d: string }>("SELECT current_date::text AS d")).rows[0]?.d ?? "";
-  const s = (await p.query<{ id: number; title: string; folder: string; status: string; muted: boolean; stalled_since: string | null }>(
-    "SELECT id, title, folder, status, muted, stalled_since::text FROM series WHERE id = $1", [id])).rows[0];
+  const s = (await p.query<{ id: number; title: string; folder: string; status: string; muted: boolean; stalled_since: string | null; description: string | null; cover_path: string | null }>(
+    "SELECT id, title, folder, status, muted, stalled_since::text, description, cover_path FROM series WHERE id = $1", [id])).rows[0];
   if (!s) return page("library", "not found", '<div class="card">no such series</div>');
 
   const bindings = (await p.query<{ id: number; source_name: string; source_url: string | null; role: string; last_checked_at: string | null }>(
@@ -45,16 +45,26 @@ export async function seriesPage(id: number): Promise<string> {
 
   return page("library",
     `${chapters.length} held &middot; ${wanted.length} queued &middot; ${gaps.length} gaps`,
-    `<div class="card">
+    `<style>.hero{display:flex;gap:18px;align-items:flex-start}
+       .hero img{width:210px;height:300px;object-fit:cover;border-radius:5px;background:#242424;flex:0 0 auto}
+       .hero .syn{color:#aaa;font-size:13px;margin-top:9px;white-space:pre-wrap}</style>
+     <div class="card">
+       <div class="hero">
+       ${s.cover_path ? `<img src="/series/${id}/cover" alt="">` : `<img alt="">`}
+       <div style="min-width:0">
        <div class="title">${esc(s.title)}${s.muted ? ' <span class="badge">muted</span>' : ""}${
-         s.status === "COMPLETED" ? ' <span class="badge">finished</span>' : ""}</div>
+         s.status === "COMPLETED" ? ' <span class="badge">finished</span>' : ""}${
+         s.status && s.status !== "UNKNOWN" && s.status !== "COMPLETED" ? ` <span class="badge">${esc(s.status.toLowerCase())}</span>` : ""}</div>
        <div class="meta">${chapters.length} chapters, ${fmt(held.at(-1) ?? null)}&ndash;${fmt(held[0] ?? null)}
          &middot; folder <span class="dim">${esc(s.folder)}</span>${
          s.stalled_since ? ' &middot; <span class="warn">gone quiet</span>' : ""}</div>
-       <table><tr><th>binding</th><th>url</th></tr>${bindRows || '<tr><td colspan="2" class="bad">no source bound</td></tr>'}</table>
+       ${s.description ? `<div class="syn">${esc(s.description.slice(0, 1400))}</div>` : '<div class="syn dim">no synopsis yet</div>'}
+       </div></div>
+       <table style="margin-top:12px"><tr><th>binding</th><th>url</th></tr>${bindRows || '<tr><td colspan="2" class="bad">no source bound</td></tr>'}</table>
        <div class="actions">
          <form method="post" action="/series/${id}/scan"><button class="weak" type="submit">check for new chapters</button></form>
          <form method="post" action="/series/${id}/mute"><button class="weak" type="submit">${s.muted ? "unmute" : "mute"}</button></form>
+         <form method="post" action="/series/${id}/metadata"><button class="weak" type="submit">refresh cover &amp; synopsis</button></form>
          <span class="hint">${gaps.length > 0 ? `missing inside your range: ${gaps.slice(0, 24).join(", ")}${gaps.length > 24 ? " ..." : ""}` : "no gaps"}</span>
        </div>
      </div>

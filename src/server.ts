@@ -11,6 +11,8 @@ import { queuePage } from "./ui/queue.js";
 import { browseIndex, browseSource, streamBrowse } from "./ui/browse.js";
 import { extensionsPage, setExtension } from "./ui/extensions.js";
 import { ASSETS } from "./ui/assets.js";
+import { refreshMetadata } from "./metadata.js";
+import { createReadStream } from "node:fs";
 import { scanWanted } from "./fetch.js";
 import { startScheduler, state as schedState, checkStalled } from "./schedule.js";
 
@@ -194,6 +196,18 @@ export async function serve(): Promise<void> {
         return html(browseSource(decodeURIComponent(b[1]!),
           url.searchParams.get("type") ?? "POPULAR", url.searchParams.getAll("f")));
       }
+      const cover = /^\/series\/(\d+)\/cover$/.exec(path);
+      if (cover) {
+        db().query<{ cover_path: string | null }>("SELECT cover_path FROM series WHERE id = $1", [Number(cover[1])])
+          .then((r) => {
+            const p2 = r.rows[0]?.cover_path;
+            if (!p2) { res.writeHead(404); res.end(); return; }
+            res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "public, max-age=3600" });
+            createReadStream(p2).on("error", () => { res.writeHead(404); res.end(); }).pipe(res);
+          })
+          .catch(() => { res.writeHead(500); res.end(); });
+        return;
+      }
       const m = /^\/series\/(\d+)$/.exec(path);
       if (m) return html(seriesPage(Number(m[1])));
     }
@@ -209,9 +223,10 @@ export async function serve(): Promise<void> {
             title: form.get("title") ?? "", sourceId: form.get("sourceId") ?? "",
             sourceName: form.get("sourceName") ?? "", url: form.get("url") ?? "",
           });
-          // Queue whatever the new source already has, so adding a series does
-          // something visible instead of just creating a row.
-          await scanWanted({ seriesId: id }).catch(() => undefined);
+          // Queue what the source has and fetch the cover, but do not make the caller
+          // wait: adding from a search should be instant so several can be added in a row.
+          void scanWanted({ seriesId: id }).catch(() => undefined);
+          void refreshMetadata(id).catch(() => undefined);
           return `/series/${id}`;
         }
         const scan = /^\/series\/(\d+)\/scan$/.exec(path);
@@ -220,6 +235,8 @@ export async function serve(): Promise<void> {
           await setExtension(form.get("pkg") ?? "", path.endsWith("install"));
           return "/extensions";
         }
+        const meta = /^\/series\/(\d+)\/metadata$/.exec(path);
+        if (meta) { await refreshMetadata(Number(meta[1])); return `/series/${meta[1]}`; }
         const mute = /^\/series\/(\d+)\/mute$/.exec(path);
         if (mute) {
           await db().query("UPDATE series SET muted = NOT muted WHERE id = $1", [Number(mute[1])]);

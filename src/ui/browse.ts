@@ -138,6 +138,20 @@ export async function browseSource(sourceId: string, type: string, filters: stri
          }
        })();
      }
+     document.addEventListener('submit', ev => {
+       const f = ev.target;
+       if (!f.classList || !f.classList.contains('addf')) return;
+       ev.preventDefault();
+       const b = f.querySelector('button');
+       b.disabled = true; b.textContent = 'adding';
+       fetch('/add', { method: 'POST', body: new URLSearchParams(new FormData(f)) })
+         .then(r => {
+           const id = (r.url.match(/\/series\/(\d+)/) || [])[1];
+           f.outerHTML = id ? '<a class="series" href="/series/'+id+'">added &rarr;</a>' : '<span class="bad">failed</span>';
+         })
+         .catch(() => { b.disabled = false; b.textContent = 'retry'; });
+     });
+
      const es = new EventSource(url);
      let n = 0;
      es.addEventListener('hit', e => {
@@ -147,7 +161,7 @@ export async function browseSource(sourceId: string, type: string, filters: stri
        d.innerHTML = (h.thumb ? '<img loading="lazy" src="'+h.thumb+'">' : '<img>') +
          '<div class="n">'+h.title.replace(/</g,'&lt;')+'</div>' +
          '<div class="f"><span class="ch dim">checking</span>' +
-         '<form method="post" action="/add"><input type="hidden" name="title" value="'+h.title.replace(/"/g,'&quot;')+'">' +
+         '<form class="addf" method="post" action="/add"><input type="hidden" name="title" value="'+h.title.replace(/"/g,'&quot;')+'">' +
          '<input type="hidden" name="sourceId" value="'+h.sourceId+'">' +
          '<input type="hidden" name="sourceName" value="'+h.sourceName.replace(/"/g,'&quot;')+'">' +
          '<input type="hidden" name="url" value="'+h.url.replace(/"/g,'&quot;')+'">' +

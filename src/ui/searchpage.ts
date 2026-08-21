@@ -80,6 +80,23 @@ function pump() {
   }
 }
 
+// Adding must not navigate: batch-adding several results from one search is the point.
+document.addEventListener('submit', ev => {
+  const f = ev.target;
+  if (!f.classList || !f.classList.contains('addf')) return;
+  ev.preventDefault();
+  const b = f.querySelector('button');
+  b.disabled = true; b.textContent = 'adding';
+  fetch('/add', { method: 'POST', body: new URLSearchParams(new FormData(f)) })
+    .then(r => {
+      const id = (r.url.match(/\/series\/(\d+)/) || [])[1];
+      f.outerHTML = id
+        ? '<span class="rec">added</span> <a class="series" href="/series/'+id+'">open</a>'
+        : '<span class="bad">failed</span>';
+    })
+    .catch(() => { b.disabled = false; b.textContent = 'retry'; });
+});
+
 const es = new EventSource('/api/search?q='+encodeURIComponent(q));
 let seen = 0;
 es.addEventListener('hit', e => {

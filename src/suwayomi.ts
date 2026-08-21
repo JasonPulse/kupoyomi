@@ -56,3 +56,35 @@ export const libraryWithChapters = async (): Promise<Array<Manga & { chapters: {
  * silently misses every title containing a colon or a quote.
  */
 export const sanitize = (s: string): string => s.replace(/[\\/:*?"<>|]/g, "_").trim();
+
+export type Extension = { pkgName: string; repo: string | null; versionName: string };
+
+export const installedExtensions = async (): Promise<Extension[]> =>
+  (await gql<{ extensions: { nodes: Extension[] } }>(
+    `{ extensions(condition:{isInstalled:true}) { nodes { pkgName repo versionName } } }`,
+  )).extensions.nodes;
+
+export const mangaChapters = async (id: number): Promise<Chapter[]> =>
+  (await gql<{ manga: { chapters: { nodes: Chapter[] } } }>(
+    `{ manga(id:${id}) { chapters { nodes { chapterNumber isDownloaded scanlator uploadDate } } } }`,
+  )).manga.chapters.nodes;
+
+/** Installs an extension by package name. This is what replaces logging into the UI. */
+export const installExtension = async (pkgName: string): Promise<void> => {
+  await gql(`mutation($pkg:String!){ updateExtension(input:{id:$pkg,patch:{install:true}}){ clientMutationId } }`,
+    { pkg: pkgName });
+};
+
+export const serverAbout = async (): Promise<{ version: string; revision: string }> =>
+  (await gql<{ aboutServer: { version: string; revision: string } }>(
+    `{ aboutServer { version revision } }`)).aboutServer;
+
+/**
+ * Pulls the extension repo index. A fresh Suwayomi reports zero available
+ * extensions until this runs, so an install issued before it fails on an unknown
+ * package name. Verified against a clean container: 0 before, 1372 after.
+ */
+export const fetchExtensionIndex = async (): Promise<number> =>
+  (await gql<{ fetchExtensions: { extensions: Array<{ pkgName: string }> } }>(
+    `mutation{ fetchExtensions(input:{}){ extensions{ pkgName } } }`,
+  )).fetchExtensions.extensions.length;

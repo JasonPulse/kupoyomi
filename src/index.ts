@@ -1,6 +1,8 @@
 import { report } from "./report.js";
 import { findHomes, compare } from "./match.js";
 import { migrate, stageCandidates, closeDb } from "./db.js";
+import { snapshot } from "./snapshot.js";
+import { serve } from "./server.js";
 
 const usage = `kupoyomi <command>
 
@@ -9,6 +11,8 @@ const usage = `kupoyomi <command>
   compare <mangaId>          chapter count, gaps and recent uploads for one candidate
   migrate                    apply db/*.sql (needs DATABASE_URL)
   import [--limit N]         find homes and stage them for confirmation
+  snapshot                   freeze the old Suwayomi's state before it is torn down
+  serve                      http api + extension bootstrap (long running)
 
 report, find and compare are read-only.
 `;
@@ -49,6 +53,13 @@ const main = async (): Promise<void> => {
       for (const l of c.latest) console.log(`     ch ${String(l.chapter).padStart(7)}  ${l.uploaded}  ${l.scanlator ?? "-"}`);
       break;
     }
+    case "snapshot":
+      await snapshot();
+      await closeDb();
+      break;
+    case "serve":
+      await serve();
+      return;                 // long running: never close the pool
     case "migrate":
       await migrate();
       await closeDb();

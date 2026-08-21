@@ -8,6 +8,22 @@ type Row = {
   resolved_title: string | null; match_kind: string; candidates: Candidate[];
 };
 
+/** Persists one comparison so the review page can load without touching a source. */
+const cache = async (
+  candidateId: number, c: Candidate, chapters: number,
+  lo: number | null, hi: number | null, gaps: number, latest: unknown, note: string | null,
+): Promise<void> => {
+  await db().query(
+    `INSERT INTO candidate_comparison
+       (candidate_id, manga_id, source_name, source_id, source_url, chapters, range_lo, range_hi, gaps, latest, note, checked_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now())
+     ON CONFLICT (candidate_id, manga_id) DO UPDATE SET
+       chapters = EXCLUDED.chapters, range_lo = EXCLUDED.range_lo, range_hi = EXCLUDED.range_hi,
+       gaps = EXCLUDED.gaps, latest = EXCLUDED.latest, note = EXCLUDED.note, checked_at = now()`,
+    [candidateId, c.mangaId, c.sourceName, c.sourceId, c.url ?? null, chapters, lo, hi, gaps,
+     JSON.stringify(latest), note]);
+};
+
 /**
  * Lists what needs a decision, with the numbers needed to make it: chapter count,
  * gaps, and the last few uploads per candidate source. Migration is never automatic,
@@ -35,10 +51,13 @@ export async function listCandidates(opts: { id?: number } = {}): Promise<void> 
       try {
         cmp = await compare(c.mangaId);
       } catch (err) {
-        console.log(`     --pick ${String(c.mangaId).padEnd(6)} ${c.sourceName.padEnd(20)} ` +
-          `UNAVAILABLE (${err instanceof Error ? err.message : String(err)})`);
+        const note = err instanceof Error ? err.message : String(err);
+        await cache(r.id, c, 0, null, null, 0, [], note);
+        console.log(`     --pick ${String(c.mangaId).padEnd(6)} ${c.sourceName.padEnd(20)} UNAVAILABLE (${note})`);
         continue;
       }
+      await cache(r.id, c, cmp.chapters, cmp.range?.[0] ?? null, cmp.range?.[1] ?? null,
+        cmp.missing.length, cmp.latest, cmp.chapters === 0 ? "no chapters" : null);
       if (cmp.chapters === 0) {
         console.log(`     --pick ${String(c.mangaId).padEnd(6)} ${c.sourceName.padEnd(20)} no chapters -- useless as a home`);
         continue;

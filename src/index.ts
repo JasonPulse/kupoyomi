@@ -1,0 +1,73 @@
+import { report } from "./report.js";
+import { findHomes, compare } from "./match.js";
+import { migrate, stageCandidates, closeDb } from "./db.js";
+
+const usage = `kupoyomi <command>
+
+  report                     what is on disk vs what the library tracks
+  find [--only S] [--limit N]  exact-title search for series stranded on dead sources
+  compare <mangaId>          chapter count, gaps and recent uploads for one candidate
+  migrate                    apply db/*.sql (needs DATABASE_URL)
+  import [--limit N]         find homes and stage them for confirmation
+
+report, find and compare are read-only.
+`;
+
+const flag = (name: string): string | undefined => {
+  const i = process.argv.indexOf(`--${name}`);
+  return i > 0 ? process.argv[i + 1] : undefined;
+};
+
+const main = async (): Promise<void> => {
+  switch (process.argv[2]) {
+    case "report":
+      await report();
+      break;
+    case "find": {
+      const only = flag("only");
+      const limit = flag("limit");
+      const { resolved, review } = await findHomes({
+        ...(only !== undefined ? { only } : {}),
+        ...(limit !== undefined ? { limit: Number(limit) } : {}),
+      });
+      console.log(`\nexact match found: ${resolved.length}   needs review: ${review.length}`);
+      for (const s of resolved) {
+        console.log(`\n${s.title}`);
+        console.log(`   ${s.files} files stranded under ${s.deadSource} (title from db: ${s.exactTitleKnown})`);
+        for (const c of s.candidates) console.log(`   -> ${c.sourceName.padEnd(22)} manga=${c.mangaId} via=${c.matched}`);
+      }
+      for (const s of review) console.log(`\nREVIEW  ${s.files} files  ${s.title}`);
+      break;
+    }
+    case "compare": {
+      const id = Number(process.argv[3]);
+      if (!Number.isInteger(id)) throw new Error("compare needs a manga id");
+      const c = await compare(id);
+      console.log(`${c.source.padEnd(20)} chapters=${String(c.chapters).padStart(4)}  ` +
+        `range=${c.range ? `${c.range[0]}-${c.range[1]}` : "-"}  missing=${c.missing.length} ` +
+        `${JSON.stringify(c.missing.slice(0, 8))}`);
+      for (const l of c.latest) console.log(`     ch ${String(l.chapter).padStart(7)}  ${l.uploaded}  ${l.scanlator ?? "-"}`);
+      break;
+    }
+    case "migrate":
+      await migrate();
+      await closeDb();
+      break;
+    case "import": {
+      const lim = flag("limit");
+      const { resolved, review } = await findHomes(lim !== undefined ? { limit: Number(lim) } : {});
+      const n = await stageCandidates(resolved, review);
+      console.log(`\nstaged ${n} candidates: ${resolved.length} exact, ${review.length} needing review`);
+      await closeDb();
+      break;
+    }
+    default:
+      process.stdout.write(usage);
+      process.exitCode = process.argv[2] === undefined ? 0 : 1;
+  }
+};
+
+main().catch((err: unknown) => {
+  console.error(err instanceof Error ? err.message : String(err));
+  process.exitCode = 1;
+});

@@ -1,0 +1,21 @@
+{
+  "name": "kupoyomi",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Owns manga series identity and a source-independent chapter ledger. Uses Suwayomi as a stateless extension runtime.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc",
+    "kupo": "node --enable-source-maps dist/index.js",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.2"
+  }
+}

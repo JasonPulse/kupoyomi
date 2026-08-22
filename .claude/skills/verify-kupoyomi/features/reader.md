@@ -9,7 +9,12 @@ What Paperback talks to, and how the extension gets installed.
 - `/api/pb/page/<id>/<number>/<index>` returns the image, extracted from the archive.
 - `/api/pb/cover/<id>` returns the stored cover.
 - `POST /api/pb/progress` moves reading position forward only; `POST /api/pb/progress/clear`
-  resets a chapter.
+  resets a chapter; `POST /api/pb/progress/upto` marks a chapter and everything below it
+  read in one call.
+- `GET /api/pb/series/<id>/progress` returns the highest chapter marked read.
+- The extension declares `MANGA_TRACKING`, so Paperback shows read/unread controls and a
+  "read up to chapter N" form. Marking read reaches this ledger rather than staying on the
+  phone, which is what makes it survive a reinstall.
 - `/paperback/` serves the built extension as a Paperback repository.
 
 Chapters are addressed by **number**, never by a source's id, so a series that migrates
@@ -33,6 +38,19 @@ $D get /api/pb/series/96/chapters
 $D get /api/pb/chapter/96/72.0000
 $D get /api/pb/page/96/72.0000/0       # image/*, and large enough to be a real page
 $D get /api/pb/cover/96
+$D get /api/pb/series/96/progress
+```
+
+Bulk marking writes to the owner's read state, so check what is there first, then undo it:
+
+```bash
+$D sql "SELECT count(*) FROM read_progress"
+curl -s -X POST -H 'content-type: application/json' -d '{"seriesId":96,"chapter":"3.0000"}' \
+  https://kupoyomi.network-gnomes.com/api/pb/progress/upto      # {"ok":true,"marked":3}
+for c in 1.0000 2.0000 3.0000; do curl -s -X POST -H 'content-type: application/json' \
+  -d "{\"seriesId\":96,\"chapter\":\"$c\"}" \
+  https://kupoyomi.network-gnomes.com/api/pb/progress/clear; done
+$D sql "SELECT count(*) FROM read_progress"                     # back to what it was
 ```
 
 Proof the archive reader works: three independent readings of one chapter agree on its page
@@ -56,6 +74,13 @@ Confirmed on 2026-08-22: 32 page URLs, `page_count` 32, 32 image entries startin
   `/api/pb/progress/clear` to undo a test write — and do undo it, it is the owner's data.
 - The extension is pinned to `@paperback/types@0.8.0-alpha.47` for Paperback 0.8.11. The
   1.0.0-alpha line targets a newer app; upgrading silently breaks installation.
+- Bump `version` in `Kupoyomi.ts` when the bundle changes, or the app has no reason to
+  offer an update and the user keeps running the old source.
+- Home sections must set `containsMoreItems: true`. That single flag is what makes the
+  View More page reachable, and it is the only layout in Paperback that is a grid rather
+  than one sideways-scrolling row.
+- `getViewMoreItems` must return `metadata: undefined` on the last page. Handing back a
+  page number past the end makes the app ask forever.
 - Rebuilding the extension needs `cd paperback-ext && npx paperback bundle`, an explicit
   `rootDir`, and `@types/node@18`. Without the rootDir the bundler emits `sources: []`
   and says nothing.

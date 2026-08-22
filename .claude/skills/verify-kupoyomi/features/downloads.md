@@ -9,7 +9,10 @@ pace, and flags series whose source has gone quiet.
   throughput for the hour and day, and anything that gave up. Polls `/api/live`.
 - `/queue`: the whole backlog with per-row state and the last error.
 - Scheduler inside `serve`: scan every 6h, fetch 10 chapters every 15m across 2 sources,
-  stall check daily. Independent locks, so a slow scan cannot starve fetching.
+  stall check daily, metadata every 6h. Independent locks, so a slow scan cannot starve
+  fetching.
+- The metadata pass fills covers and synopses for series missing either, so a newly added
+  series does not sit blank waiting for someone to run a command.
 - Chapters are written to `.part` then renamed, so a mid-chapter failure cannot leave a
   truncated archive that looks complete.
 
@@ -24,6 +27,7 @@ $D get /api/live
 $D get /downloads
 $D get /queue
 $D get /api/stats     # scheduler keys show which jobs have run or are in flight
+                      # lastScan, lastFetch, lastStallCheck, lastMetadata
 ```
 
 Proof that downloading actually works, without triggering anything:

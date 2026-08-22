@@ -46,6 +46,13 @@ resolve as JPEG rather than 404.
   prove the numbers.
 - The stat tile row is a fixed four columns. Five tiles wrap and leave a hole — that was a
   real regression, so count the tiles.
+- Every series should have cover art, including archived ones. Those have no source
+  binding by design, so the cover comes from the best-shaped of the first eight pages of
+  their earliest chapter. A `no cover` tile means the metadata pass has not reached it yet,
+  or the archive is unreadable.
+- On a pure webtoon every page is one long strip, so the fallback cover is a strip. That is
+  the honest best answer without an image decoder; a proper cover needs the source
+  thumbnail, and a source that no longer resolves the series cannot give one.
 - Panels are the parchment frame with the caps as pseudo-elements. A panel with padding
   smaller than the 27px cap hides its own contents; the library filter form vanished
   entirely that way. If a panel looks empty, check its padding before anything else.

@@ -10,10 +10,14 @@ const dir = "src/ui";
 let checked = 0, bad = 0;
 for (const f of readdirSync(dir).filter((x) => x.endsWith(".ts"))) {
   const src = readFileSync(join(dir, f), "utf8");
-  const re = /String\.raw`([\s\S]*?)`;/g;
-  let m;
-  while ((m = re.exec(src)) !== null) {
-    const js = m[1].replace(/\$\{[^}]*\}/g, '"x"');   // placeholders stand in for values
+  // Two shapes: a String.raw CLIENT constant, and a <script> block written inline in the
+  // page's template literal. Only the first used to be checked, which left the inline
+  // ones exposed to the exact bug this exists to catch.
+  const blocks = [];
+  for (const m of src.matchAll(/String\.raw`([\s\S]*?)`;/g)) blocks.push(m[1]);
+  for (const m of src.matchAll(/<script>([\s\S]*?)<\/script>/g)) blocks.push(m[1]);
+  for (const block of blocks) {
+    const js = block.replace(/\$\{[^}]*\}/g, '"x"');   // placeholders stand in for values
     const tmp = join(mkdtempSync(join(tmpdir(), "cjs-")), "block.js");
     writeFileSync(tmp, js);
     checked++;

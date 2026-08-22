@@ -384,6 +384,14 @@ export async function serve(): Promise<void> {
         }
         const meta = /^\/series\/(\d+)\/metadata$/.exec(path);
         if (meta) { await refreshMetadata(Number(meta[1])); return `/series/${meta[1]}`; }
+        const read = /^\/series\/(\d+)\/read$/.exec(path);
+        if (read) {
+          const chapter = new URLSearchParams(await readBody(req)).get("chapter")?.trim() ?? "";
+          // A blank box is not a request to mark nothing read, it is a mistake, so it
+          // does nothing rather than quietly marking chapter 0.
+          if (chapter) await setProgressUpTo(Number(read[1]), chapter);
+          return `/series/${read[1]}`;
+        }
         const mute = /^\/series\/(\d+)\/mute$/.exec(path);
         if (mute) {
           await db().query("UPDATE series SET muted = NOT muted WHERE id = $1", [Number(mute[1])]);

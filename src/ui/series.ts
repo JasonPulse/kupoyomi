@@ -18,6 +18,15 @@ export async function seriesPage(id: number): Promise<string> {
   const wanted = (await p.query<{ chapter_number: string; state: string; attempts: number; last_error: string | null }>(
     "SELECT chapter_number, state, attempts, last_error FROM wanted WHERE series_id = $1 AND state <> 'done' ORDER BY chapter_number",
     [id])).rows;
+  // Read state is here rather than only in the reader because Paperback keeps a source's
+  // read state entirely on the device: ChapterProgressManager marks a chapter complete
+  // locally and never calls out. Trackers, which do call out, are a separate extension
+  // type from a separate repository, so a source cannot be one.
+  const readRows = (await p.query<{ chapter_number: string; completed: boolean }>(
+    "SELECT chapter_number, completed FROM read_progress WHERE series_id = $1", [id])).rows;
+  const readSet = new Set(readRows.filter((r) => r.completed).map((r) => fmt(r.chapter_number)));
+  const readMax = readRows.filter((r) => r.completed)
+    .reduce<number | null>((m, r) => Math.max(m ?? -Infinity, Number(r.chapter_number)) , null);
 
   const held = chapters.map((c) => Number(c.chapter_number));
   const whole = new Set(held.filter(Number.isInteger));
@@ -45,11 +54,17 @@ export async function seriesPage(id: number): Promise<string> {
         <td class="${w.state === "failed" ? "bad" : "warn"}">${esc(w.state)}${w.attempts > 0 ? ` (${w.attempts} tries)` : ""}</td>
         <td class="dim" style="font-size:11px">${esc((w.last_error ?? "").slice(0, 80))}</td></tr>`).join("");
 
-  const chapRows = chapters.slice(0, 400).map((c) => `<tr>
-    <td>ch ${fmt(c.chapter_number)}</td>
+  const chapRows = chapters.slice(0, 400).map((c) => {
+    const n = fmt(c.chapter_number);
+    const isRead = readSet.has(n);
+    return `<tr>
+    <td>ch ${n}</td>
     <td class="dim">${c.page_count ?? "-"}p</td>
     <td class="dim">${esc(c.scanlator ?? "-")}</td>
-    <td class="dim">${esc(ago(c.uploaded_at, today))}</td></tr>`).join("");
+    <td class="dim">${esc(ago(c.uploaded_at, today))}</td>
+    <td><button class="weak rd" data-ch="${n}" data-read="${isRead ? "1" : "0"}">${
+      isRead ? "read" : "unread"}</button></td></tr>`;
+  }).join("");
 
   return page("library",
     `${chapters.length} held &middot; ${wanted.length} queued &middot; ${gaps.length} gaps`,
@@ -79,6 +94,9 @@ export async function seriesPage(id: number): Promise<string> {
          <form method="post" action="/series/${id}/scan"><button class="weak" type="submit">check for new chapters</button></form>
          <form method="post" action="/series/${id}/mute"><button class="weak" type="submit">${s.muted ? "unmute" : "mute"}</button></form>
          <form method="post" action="/series/${id}/metadata"><button class="weak" type="submit">refresh cover &amp; synopsis</button></form>
+         <form method="post" action="/series/${id}/read" style="display:inline">
+           <input type="hidden" name="chapter" value="${fmt(held[0] ?? null)}">
+           <button class="weak" type="submit">mark all read</button></form>
          <a class="series" href="/series/${id}/remove" style="margin-left:auto;color:#9b3226">remove from library</a>
          ${gaps.length > 0 ? `<a class="series" href="/series/${id}/gaps">fill ${gaps.length} gaps</a>` : ""}
          <span class="hint">${gaps.length > 0 ? `missing inside your range: ${gaps.slice(0, 18).join(", ")}${gaps.length > 18 ? " ..." : ""}` : "no gaps"}</span>
@@ -100,8 +118,36 @@ export async function seriesPage(id: number): Promise<string> {
        }).catch(() => { tr.querySelector('.av').textContent = '?'; });
      });
      </script>
+     <script>
+     document.querySelectorAll('button.rd').forEach(function (b) {
+       b.addEventListener('click', function () {
+         var wasRead = b.dataset.read === '1';
+         var url = wasRead ? '/api/pb/progress/clear' : '/api/pb/progress';
+         b.disabled = true;
+         fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
+           body: JSON.stringify({ seriesId: SERIES_ID, chapter: b.dataset.ch, page: 0, completed: true }) })
+           .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+           .then(function () {
+             b.dataset.read = wasRead ? '0' : '1';
+             b.textContent = wasRead ? 'unread' : 'read';
+           })
+           .catch(function () { b.textContent = 'failed'; })
+           .then(function () { b.disabled = false; });
+       });
+     });
+     </script>
+     <script>var SERIES_ID = ${id};</script>
      <div class="card"><div class="title">Chapters</div>
-       <table><tr><th>chapter</th><th>pages</th><th>group</th><th>uploaded</th></tr>${chapRows}</table>
+       <div class="actions" style="margin:0 0 10px">
+         <form method="post" action="/series/${id}/read">
+           <span class="hint" style="margin:0 8px 0 0">read up to chapter</span>
+           <input name="chapter" value="${readMax !== null ? fmt(String(readMax)) : ""}"
+                  placeholder="${fmt(held[0] ?? null)}" style="width:80px">
+           <button class="weak" type="submit">mark</button></form>
+         <span class="hint">marks that chapter and everything below it read${
+           readMax !== null ? `. currently read up to ${fmt(String(readMax))}` : ""}</span>
+       </div>
+       <table><tr><th>chapter</th><th>pages</th><th>group</th><th>uploaded</th><th></th></tr>${chapRows}</table>
        ${chapters.length > 400 ? `<div class="dim" style="margin-top:8px">showing the newest 400 of ${chapters.length}</div>` : ""}
      </div>`);
 }

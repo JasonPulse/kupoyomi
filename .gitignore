@@ -5,3 +5,6 @@ proposal*.json
 .env
 decisions.tsv
 dist-test/
+
+# verification evidence: kept on disk, never committed
+.verify/

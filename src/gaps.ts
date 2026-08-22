@@ -25,6 +25,10 @@ export async function findGaps(seriesId: number): Promise<GapReport> {
     "SELECT chapter_number AS n FROM wanted WHERE series_id = $1 AND state <> 'done'", [seriesId])).rows
     .map((r) => Number(r.n)));
 
+  // Only whole numbers, deliberately. A source's decimals are its own invention -- one
+  // site splits chapter 12 into 12.1 and 12.2 where another does not -- so treating a
+  // missing 12.2 as a hole would invent gaps that nobody is missing. This does mean the
+  // count covers whole chapters only, which is the honest scope rather than a bug.
   const whole = [...new Set(held.filter(Number.isInteger))].sort((a, b) => a - b);
   const have = new Set(whole);
   const missing: number[] = [];
@@ -67,12 +71,19 @@ export async function findGapSources(seriesId: number, concurrency = 6): Promise
       if (!src) return;
       try {
         let hit: { id: number; title: string; url: string } | undefined;
-        for (const q of variants) {
-          const r = await gql<{ fetchSourceManga: { mangas: Array<{ id: number; title: string; url: string }> } }>(
-            SEARCH, { src: src.id, q });
-          hit = r.fetchSourceManga.mangas.find(
-            (m) => m.title === gaps.title || sanitize(m.title) === sanitize(gaps.title));
-          if (hit) break;
+        // Two pages, not one: a popular title's exact match can sit below a page of
+        // loose matches, which previously read as "no source carries this".
+        outer: for (const q of variants) {
+          for (const pageNo of [1, 2]) {
+            const r = await gql<{ fetchSourceManga: { hasNextPage: boolean; mangas: Array<{ id: number; title: string; url: string }> } }>(
+              `mutation($src:LongString!,$q:String!,$p:Int!){
+                 fetchSourceManga(input:{source:$src,type:SEARCH,query:$q,page:$p}){
+                   hasNextPage mangas{ id title url } } }`, { src: src.id, q, p: pageNo });
+            hit = r.fetchSourceManga.mangas.find(
+              (m) => m.title === gaps.title || sanitize(m.title) === sanitize(gaps.title));
+            if (hit) break outer;
+            if (!r.fetchSourceManga.hasNextPage) break;
+          }
         }
         if (!hit) continue;
         await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,

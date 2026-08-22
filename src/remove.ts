@@ -8,6 +8,7 @@ export type RemovalPlan = {
   chapters: number; canonicalDir: string; canonicalFiles: number;
   /** Distinct bytes: files still linked elsewhere do not free space until that copy goes. */
   bytes: number; sharedFiles: number;
+  /** Only folders proven to hold a hardlink to one of our chapters. */
   legacyDirs: Array<{ path: string; files: number }>;
   candidateId: number | null;
 };
@@ -54,9 +55,25 @@ export async function planRemoval(seriesId: number): Promise<RemovalPlan> {
     guesses.add(`${config.legacyRoot}/${b.source_name}/${sanitize(s.title)}`);
     if (cand) guesses.add(`${config.legacyRoot}/${b.source_name}/${cand.folder}`);
   }
-  const legacyDirs = [...guesses].filter(existsSync).map((path) => ({
-    path, files: readdirSync(path).filter((f) => f.toLowerCase().endsWith(".cbz")).length,
-  }));
+
+  // A path built from a source name and a sanitized title is a guess, and existing is
+  // not proof: another series with a similar sanitized title would be deleted instead.
+  // Our chapters are hardlinks, so a folder is only accepted when a file inside it
+  // shares an inode with one of them. That is proof rather than inference.
+  const ourInodes = new Set<number>();
+  for (const r of rows) {
+    try { ourInodes.add(Number(statSync(r.file_path).ino)); } catch { /* gone */ }
+  }
+  const legacyDirs: Array<{ path: string; files: number }> = [];
+  for (const path of guesses) {
+    if (!existsSync(path)) continue;
+    const cbz = readdirSync(path).filter((f) => f.toLowerCase().endsWith(".cbz"));
+    let linked = 0;
+    for (const f of cbz) {
+      try { if (ourInodes.has(Number(statSync(`${path}/${f}`).ino))) linked++; } catch { /* ignore */ }
+    }
+    if (linked > 0) legacyDirs.push({ path, files: cbz.length });
+  }
 
   return {
     seriesId, title: s.title, folder: s.folder, chapters: rows.length,

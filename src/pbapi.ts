@@ -84,7 +84,19 @@ export async function getPage(seriesId: number, chapter: string, index: number):
   return { body, type };
 }
 
-/** Progress lives here rather than on one device, which is the point of owning it. */
+/** Clears progress for a chapter, so it can be read again from the start. */
+export async function clearProgress(seriesId: number, chapter: string): Promise<void> {
+  await db().query("DELETE FROM read_progress WHERE series_id = $1 AND chapter_number = $2",
+    [seriesId, chapter]);
+}
+
+/**
+ * Progress lives here rather than on one device, which is the point of owning it.
+ *
+ * It only moves forward, so a reader reopening a chapter cannot rewind your place by
+ * reporting page 1. The cost is that nothing here can mark a chapter unread, which is
+ * what clearProgress is for.
+ */
 export async function setProgress(seriesId: number, chapter: string, page: number, completed: boolean): Promise<void> {
   await db().query(
     `INSERT INTO read_progress (series_id, chapter_number, last_page, completed, updated_at)

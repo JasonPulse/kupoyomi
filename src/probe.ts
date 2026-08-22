@@ -157,3 +157,41 @@ export async function tidyExtensions(opts: { dryRun?: boolean } = {}): Promise<v
   const after = await sourcesWithExtension();
   console.log(`uninstalled ${drop.length}; sources now ${after.length}`);
 }
+
+
+/**
+ * Drops candidate entries that the comparison pass proved worthless, so the extensions
+ * whose only contribution was a worthless entry become unreferenced and can go.
+ *
+ * The sweep kept anything that matched a title, which includes storefronts and official
+ * readers: they carry the name and no downloadable chapters. Keeping them installed
+ * doubles the fan-out of every future search for nothing.
+ */
+export async function pruneCandidates(opts: { dryRun?: boolean } = {}): Promise<void> {
+  const p = db();
+  const rows = (await p.query<{ id: number; folder: string; candidates: Candidate[] }>(
+    "SELECT id, folder, candidates FROM import_candidate WHERE confirmed_series_id IS NULL")).rows;
+  const cmp = (await p.query<{ candidate_id: number; manga_id: number; chapters: number }>(
+    "SELECT candidate_id, manga_id, chapters FROM candidate_comparison")).rows;
+  const chaptersFor = new Map(cmp.map((c) => [`${c.candidate_id}:${c.manga_id}`, c.chapters]));
+
+  let dropped = 0, kept = 0, unchecked = 0;
+  for (const r of rows) {
+    const before = r.candidates.length;
+    const keep = r.candidates.filter((c) => {
+      const n = chaptersFor.get(`${r.id}:${c.mangaId}`);
+      if (n === undefined) { unchecked++; return true; }   // never compared, so no verdict
+      return n > 0;
+    });
+    dropped += before - keep.length;
+    kept += keep.length;
+    if (!opts.dryRun && keep.length !== before) {
+      await p.query("UPDATE import_candidate SET candidates = $1 WHERE id = $2",
+        [JSON.stringify(keep), r.id]);
+      await p.query("DELETE FROM candidate_comparison WHERE candidate_id = $1 AND chapters = 0", [r.id]);
+    }
+  }
+  console.log(`${opts.dryRun ? "[dry run] " : ""}candidates: dropped ${dropped} with no chapters, kept ${kept}` +
+    (unchecked > 0 ? `, ${unchecked} not yet compared and left alone` : ""));
+  if (unchecked > 0) console.log("  run `candidates` first so every entry has a verdict");
+}

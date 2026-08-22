@@ -9,7 +9,7 @@ import { archiveCandidate } from "./archive.js";
 import { backfillUrls } from "./backfill.js";
 import { relayout } from "./relayout.js";
 import { prune } from "./prune.js";
-import { probe, tidyExtensions } from "./probe.js";
+import { probe, tidyExtensions, pruneCandidates } from "./probe.js";
 import { scanWanted, fetchWanted } from "./fetch.js";
 import { checkStalled } from "./schedule.js";
 import { refreshAllMetadata } from "./metadata.js";
@@ -35,6 +35,7 @@ const usage = `kupoyomi <command>
   prune [--dry-run]          drop ledger rows whose file is gone
   probe [--batch N] [--max M] install extensions in batches to find unhoused series
   tidy [--dry-run]           uninstall probe extensions nothing references
+  prune-candidates [--dry-run]  drop candidate entries with no chapters behind them
   scan [seriesId]            queue chapters the bound source has and we do not
   fetch [--limit N]          download queued chapters
   stalled                    flag series whose source has gone quiet
@@ -113,6 +114,10 @@ const main = async (): Promise<void> => {
     }
     case "parse-check":
       await parseCheck();
+      break;
+    case "prune-candidates":
+      await pruneCandidates({ dryRun: process.argv.includes("--dry-run") });
+      await closeDb();
       break;
     case "tidy":
       await tidyExtensions({ dryRun: process.argv.includes("--dry-run") });

@@ -11,6 +11,8 @@ import { queuePage } from "./ui/queue.js";
 import { downloadsPage, liveState } from "./ui/downloads.js";
 import { browseIndex, browseSource, streamBrowse } from "./ui/browse.js";
 import { previewPage } from "./ui/preview.js";
+import { confirmRemovalPage } from "./ui/remove.js";
+import { removeSeries } from "./remove.js";
 import { extensionsPage, setExtension } from "./ui/extensions.js";
 import { ASSETS } from "./ui/assets.js";
 import { refreshMetadata } from "./metadata.js";
@@ -278,6 +280,8 @@ export async function serve(): Promise<void> {
           .catch(() => { res.writeHead(500); res.end(); });
         return;
       }
+      const rem = /^\/series\/(\d+)\/remove$/.exec(path);
+      if (rem) return html(confirmRemovalPage(Number(rem[1])));
       const m = /^\/series\/(\d+)$/.exec(path);
       if (m) return html(seriesPage(Number(m[1])));
     }
@@ -304,6 +308,13 @@ export async function serve(): Promise<void> {
         if (path === "/extensions/install" || path === "/extensions/uninstall") {
           await setExtension(form.get("pkg") ?? "", path.endsWith("install"));
           return "/extensions";
+        }
+        const doRemove = /^\/series\/(\d+)\/remove$/.exec(path);
+        if (doRemove) {
+          await removeSeries(Number(doRemove[1]), {
+            files: form.get("files") === "1", legacy: form.get("legacy") === "1",
+          });
+          return "/";
         }
         const promote = /^\/series\/(\d+)\/promote$/.exec(path);
         if (promote) {

@@ -13,6 +13,7 @@ import { probe, tidyExtensions } from "./probe.js";
 import { scanWanted, fetchWanted } from "./fetch.js";
 import { checkStalled } from "./schedule.js";
 import { refreshAllMetadata } from "./metadata.js";
+import { planRemoval, removeSeries } from "./remove.js";
 import { parseCheck } from "./parsecheck.js";
 import { serve } from "./server.js";
 
@@ -37,6 +38,7 @@ const usage = `kupoyomi <command>
   fetch [--limit N]          download queued chapters
   stalled                    flag series whose source has gone quiet
   metadata [--force]         fetch covers and synopses for series missing them
+  remove <seriesId> [--files] [--legacy]  delete a series; prints the plan without flags
   parse-check                how well chapter numbers can be read from filenames
   serve                      http api + extension bootstrap (long running)
 
@@ -123,6 +125,23 @@ const main = async (): Promise<void> => {
     case "fetch": {
       const lim = flag("limit");
       await fetchWanted(lim !== undefined ? { limit: Number(lim) } : {});
+      await closeDb();
+      break;
+    }
+    case "remove": {
+      const sid = Number(process.argv[3]);
+      if (!Number.isInteger(sid)) throw new Error("usage: remove <seriesId> [--files] [--legacy]");
+      const files = process.argv.includes("--files"), legacy = process.argv.includes("--legacy");
+      const plan = await planRemoval(sid);
+      console.log(`${plan.title}: ${plan.chapters} chapters, ${plan.canonicalFiles} files, ` +
+        `${(plan.bytes / 1073741824).toFixed(2)}GB, ${plan.sharedFiles} still linked elsewhere`);
+      console.log(`  library: ${plan.canonicalDir}`);
+      for (const d of plan.legacyDirs) console.log(`  original: ${d.path} (${d.files} files)`);
+      if (!files && !legacy) { console.log("  dry run: pass --files and/or --legacy to delete"); }
+      else {
+        const r = await removeSeries(sid, { files, legacy });
+        console.log(`  removed ${r.rows} series row, ${r.deletedFiles} files, ${r.deletedDirs.length} folders`);
+      }
       await closeDb();
       break;
     }

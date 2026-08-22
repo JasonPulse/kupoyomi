@@ -79,6 +79,7 @@ export async function seriesPage(id: number): Promise<string> {
          <form method="post" action="/series/${id}/scan"><button class="weak" type="submit">check for new chapters</button></form>
          <form method="post" action="/series/${id}/mute"><button class="weak" type="submit">${s.muted ? "unmute" : "mute"}</button></form>
          <form method="post" action="/series/${id}/metadata"><button class="weak" type="submit">refresh cover &amp; synopsis</button></form>
+         <a class="series" href="/series/${id}/remove" style="margin-left:auto;color:#9b3226">remove from library</a>
          <span class="hint">${gaps.length > 0 ? `missing inside your range: ${gaps.slice(0, 24).join(", ")}${gaps.length > 24 ? " ..." : ""}` : "no gaps"}</span>
        </div>
      </div>

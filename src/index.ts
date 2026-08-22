@@ -14,6 +14,7 @@ import { scanWanted, fetchWanted } from "./fetch.js";
 import { checkStalled } from "./schedule.js";
 import { refreshAllMetadata } from "./metadata.js";
 import { planRemoval, removeSeries } from "./remove.js";
+import { findGaps, findGapSources } from "./gaps.js";
 import { parseCheck } from "./parsecheck.js";
 import { serve } from "./server.js";
 
@@ -39,6 +40,7 @@ const usage = `kupoyomi <command>
   stalled                    flag series whose source has gone quiet
   metadata [--force]         fetch covers and synopses for series missing them
   remove <seriesId> [--files] [--legacy]  delete a series; prints the plan without flags
+  gaps <seriesId>            what is missing, and which sources carry it
   parse-check                how well chapter numbers can be read from filenames
   serve                      http api + extension bootstrap (long running)
 
@@ -125,6 +127,20 @@ const main = async (): Promise<void> => {
     case "fetch": {
       const lim = flag("limit");
       await fetchWanted(lim !== undefined ? { limit: Number(lim) } : {});
+      await closeDb();
+      break;
+    }
+    case "gaps": {
+      const sid = Number(process.argv[3]);
+      if (!Number.isInteger(sid)) throw new Error("usage: gaps <seriesId>");
+      const g = await findGaps(sid);
+      console.log(`${g.title}: ${g.missing.length} missing, ${g.queued.length} already queued, ${g.unsupplied.length} need another source`);
+      if (g.unsupplied.length > 0) {
+        console.log(`  ${g.unsupplied.slice(0, 40).join(", ")}`);
+        for (const s2 of await findGapSources(sid)) {
+          console.log(`  ${s2.sourceName.padEnd(22)} covers ${String(s2.covers.length).padStart(3)} of ${g.unsupplied.length}: ${s2.covers.slice(0, 14).join(", ")}`);
+        }
+      }
       await closeDb();
       break;
     }

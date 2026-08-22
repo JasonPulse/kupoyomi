@@ -12,6 +12,8 @@ import { downloadsPage, liveState } from "./ui/downloads.js";
 import { browseIndex, browseSource, streamBrowse } from "./ui/browse.js";
 import { previewPage } from "./ui/preview.js";
 import { confirmRemovalPage } from "./ui/remove.js";
+import { gapsPage } from "./ui/gaps.js";
+import { queueGapFill } from "./gaps.js";
 import { removeSeries } from "./remove.js";
 import { extensionsPage, setExtension } from "./ui/extensions.js";
 import { ASSETS } from "./ui/assets.js";
@@ -290,6 +292,8 @@ export async function serve(): Promise<void> {
           .catch(() => { res.writeHead(500); res.end(); });
         return;
       }
+      const gp = /^\/series\/(\d+)\/gaps$/.exec(path);
+      if (gp) return html(gapsPage(Number(gp[1])));
       const rem = /^\/series\/(\d+)\/remove$/.exec(path);
       if (rem) return html(confirmRemovalPage(Number(rem[1])));
       const m = /^\/series\/(\d+)$/.exec(path);
@@ -318,6 +322,16 @@ export async function serve(): Promise<void> {
         if (path === "/extensions/install" || path === "/extensions/uninstall") {
           await setExtension(form.get("pkg") ?? "", path.endsWith("install"));
           return "/extensions";
+        }
+        const doGaps = /^\/series\/(\d+)\/gaps$/.exec(path);
+        if (doGaps) {
+          const sid = Number(doGaps[1]);
+          const numbers = (form.get("numbers") ?? "").split(",").map(Number).filter(Number.isFinite);
+          await queueGapFill(sid, {
+            sourceId: form.get("sourceId") ?? "", sourceName: form.get("sourceName") ?? "",
+            url: form.get("url") ?? "",
+          }, numbers);
+          return `/series/${sid}`;
         }
         const doRemove = /^\/series\/(\d+)\/remove$/.exec(path);
         if (doRemove) {

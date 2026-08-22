@@ -121,6 +121,10 @@ export async function queueGapFill(
          DO UPDATE SET source_url = EXCLUDED.source_url RETURNING id`,
       [seriesId, source.sourceId, source.sourceName, source.url]);
     const bindingId = b.rows[0]!.id;
+    // Filling gaps on a stopped series would queue rows that fetch skips, which is how a
+    // queue grows entries nothing will ever act on. Asking for chapters is asking for
+    // updates, so it starts checking again.
+    await client.query("UPDATE series SET muted = false WHERE id = $1 AND muted", [seriesId]);
     let queued = 0;
     for (const n of numbers) {
       const r = await client.query(

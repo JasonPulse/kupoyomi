@@ -106,17 +106,17 @@ export async function seriesPage(id: number): Promise<string> {
          <form method="post" action="/series/${id}/mute">
            <button class="weak" type="submit">${s.muted ? "start checking again" : "stop getting updates"}</button></form>
          <span class="hint">${s.muted
-           ? "Stopped. No new chapters are looked for, the queue is paused, no source is "
+           ? "Stopped. No new chapters are looked for, nothing is queued, no source is "
              + "offered to migrate to, and it will never be flagged as gone quiet. Everything "
              + "you hold stays, and it is still readable."
            : "Checked every scan for new chapters, and flagged if its source goes quiet for "
              + `${process.env["STALL_DAYS"] ?? 21} days. Stopping is for a series you have finished `
-             + "or given up on: nothing is deleted, and it stays readable."}</span>
+             + "or given up on: no file is deleted, and it stays readable."}</span>
        </div>
        ${wanted.length === 0 ? "" : `<div class="dim" style="margin-top:8px;font-size:12px">`
-         + `${wanted.length} chapters are queued. ${s.muted
-             ? "They are paused, and resume if you start checking again."
-             : "Stopping pauses them rather than discarding them."}</div>`}
+         + `${wanted.length} chapters are queued. Stopping drops them from the queue. `
+         + `Starting again and checking for new chapters rebuilds whatever is still missing.`
+         + `</div>`}
      </div>
      <div class="card"><div class="title">Queue</div>
        <table><tr><th>chapter</th><th>state</th><th>last error</th></tr>${wantRows}</table></div>

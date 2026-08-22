@@ -100,14 +100,9 @@ const stats = async (): Promise<Record<string, unknown>> => {
     needs_review: await q("SELECT count(*) n FROM import_candidate WHERE match_kind = 'review' AND confirmed_series_id IS NULL"),
     stalled: await q("SELECT count(*) n FROM series WHERE stalled_since IS NOT NULL AND NOT muted"),
     extensions_desired: await q("SELECT count(*) n FROM extension WHERE desired"),
-    // Split, because a paused row never moves and counting it as outstanding makes a
-    // healthy queue look permanently stuck.
-    wanted_outstanding: await q(
-      `SELECT count(*) n FROM wanted w JOIN series s ON s.id = w.series_id
-        WHERE w.state <> 'done' AND NOT s.muted`),
-    wanted_paused: await q(
-      `SELECT count(*) n FROM wanted w JOIN series s ON s.id = w.series_id
-        WHERE w.state <> 'done' AND s.muted`),
+    // Stopping a series deletes its outstanding rows, so this needs no muted clause and
+    // there is no second bucket to report.
+    wanted_outstanding: await q("SELECT count(*) n FROM wanted WHERE state <> 'done'"),
     wanted_failed: await q("SELECT count(*) n FROM wanted WHERE state = 'failed' AND attempts >= 4"),
     last_reconcile: lastReconcile,
     scheduler: schedState,
@@ -407,8 +402,17 @@ export async function serve(): Promise<void> {
         }
         const mute = /^\/series\/(\d+)\/mute$/.exec(path);
         if (mute) {
-          await db().query("UPDATE series SET muted = NOT muted WHERE id = $1", [Number(mute[1])]);
-          return `/series/${mute[1]}`;
+          const sid = Number(mute[1]);
+          const now = (await db().query<{ muted: boolean }>(
+            "UPDATE series SET muted = NOT muted WHERE id = $1 RETURNING muted", [sid])).rows[0];
+          // Stopping discards the backlog rather than parking it. A queue that keeps rows
+          // it will never act on is a queue you cannot read. Nothing is lost: the rows are
+          // derived from what the source carries, so starting again and scanning rebuilds
+          // exactly what is still missing.
+          if (now?.muted) {
+            await db().query("DELETE FROM wanted WHERE series_id = $1 AND state <> 'done'", [sid]);
+          }
+          return `/series/${sid}`;
         }
         throw new Error("not found");
       };

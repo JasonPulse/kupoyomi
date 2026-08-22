@@ -142,9 +142,8 @@ export function startScheduler(): void {
             "SELECT count(*) n FROM wanted WHERE state = 'done'")).rows[0];
           await fetchWanted({ limit: batch, concurrency });
           const after = (await db().query<{ d: string; o: string }>(
-            `SELECT count(*) FILTER (WHERE w.state = 'done') AS d,
-                    count(*) FILTER (WHERE w.state <> 'done' AND NOT s.muted) AS o
-               FROM wanted w JOIN series s ON s.id = w.series_id`)).rows[0];
+            `SELECT count(*) FILTER (WHERE state = 'done') AS d,
+                    count(*) FILTER (WHERE state <> 'done') AS o FROM wanted`)).rows[0];
           state.outstanding = Number(after?.o ?? 0);
           state.lastFetch = { at: new Date().toISOString(),
             downloaded: Number(after?.d ?? 0) - Number(done?.n ?? 0), failed: 0 };

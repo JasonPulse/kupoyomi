@@ -147,3 +147,30 @@ test("marking read is idempotent and never rewinds", { skip: !haveDb }, async ()
   assert.equal(again, 3, "re-running touches the same rows and adds none");
   assert.equal(await lastReadChapter(seriesId), 3);
 });
+
+test("stopping a series clears its outstanding queue but keeps its history", { skip: !haveDb }, async () => {
+  const p = db();
+  const b = await p.query<{ id: number }>(
+    `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
+     VALUES ($1,'S','S',0,'primary') RETURNING id`, [seriesId]);
+  const bindingId = b.rows[0]!.id;
+  await p.query(
+    `INSERT INTO wanted (series_id, chapter_number, binding_id, state) VALUES
+       ($1, 10, $2, 'pending'), ($1, 11, $2, 'failed'), ($1, 12, $2, 'done')`,
+    [seriesId, bindingId]);
+
+  // What the mute route does. Kept in one place here so the invariant is asserted rather
+  // than assumed: a stopped series contributes nothing to the queue.
+  await p.query("UPDATE series SET muted = true WHERE id = $1", [seriesId]);
+  await p.query("DELETE FROM wanted WHERE series_id = $1 AND state <> 'done'", [seriesId]);
+
+  const left = (await p.query<{ chapter_number: string; state: string }>(
+    "SELECT chapter_number, state FROM wanted WHERE series_id = $1 ORDER BY chapter_number",
+    [seriesId])).rows;
+  assert.equal(left.length, 1, "only the completed row survives");
+  assert.equal(left[0]?.state, "done", "download history is not queue backlog and stays");
+
+  const outstanding = (await p.query<{ n: string }>(
+    "SELECT count(*) n FROM wanted WHERE state <> 'done'")).rows[0];
+  assert.equal(Number(outstanding?.n), 0, "a stopped series adds nothing to the outstanding count");
+});

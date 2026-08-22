@@ -182,6 +182,15 @@ export async function serve(): Promise<void> {
     // The Paperback extension's API. Kept under one prefix so it is obvious what is
     // public contract and what is internal to the web UI.
     if (path.startsWith("/api/pb/")) {
+      // Logged, because the alternative is guessing. When read state failed to arrive
+      // from the app there was no way to tell a request that failed from one the app
+      // never made. Page and cover reads are excluded: a chapter is 30 of them and the
+      // log would be nothing else.
+      if (!/^\/api\/pb\/(page|cover)\//.test(path)) {
+        const started = Date.now();
+        res.on("finish", () => console.log(
+          `pb ${req.method} ${path}${url.search} -> ${res.statusCode} in ${Date.now() - started}ms`));
+      }
       const pb = async (): Promise<void> => {
         const parts = path.split("/").filter(Boolean).slice(2);   // after api/pb
         if (parts[0] === "series" && parts.length === 1) return send(200, await listSeries(url.searchParams.get("q") ?? undefined));

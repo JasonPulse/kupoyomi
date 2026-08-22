@@ -39,6 +39,29 @@ $D get /series/79/cover                                 # must be image/jpeg, no
 Proof of a working page: tile count equals the series count from `/api/stats`, and covers
 resolve as JPEG rather than 404.
 
+## Read state
+
+Set from the series page, not from Paperback. A "read up to chapter" box marks that chapter
+and everything below it, `mark all read` does the whole series, and each chapter row has a
+read/unread toggle. Unread posts to `/api/pb/progress/clear` rather than writing a lower
+value, because progress ratchets forward and cannot be lowered.
+
+## Stopping updates
+
+The Updates section on a series page. Stopping (the `muted` flag) means: no scan for new
+chapters, the existing queue pauses, no migration candidates offered, never flagged as gone
+quiet. Nothing is deleted and it stays readable. Paused rows are reported separately from
+outstanding in `/api/stats`, on `/queue`, and in the scheduler's count, because a row that
+will never move should not read as work remaining.
+
+```bash
+curl -s https://kupoyomi.network-gnomes.com/api/stats |
+  python3 -c "import json,sys;d=json.load(sys.stdin);print(d['wanted_outstanding'],d['wanted_paused'])"
+```
+
+Driving it writes to the owner's library, so mute and unmute in the same breath and check
+the counts return to where they started.
+
 ## Gotchas
 
 - Availability per binding on the series page is fetched **client-side** from
@@ -53,6 +76,9 @@ resolve as JPEG rather than 404.
 - On a pure webtoon every page is one long strip, so the fallback cover is a strip. That is
   the honest best answer without an image decoder; a proper cover needs the source
   thumbnail, and a source that no longer resolves the series cannot give one.
+- Every POST route shares one `readBody` call at the top of the handler. Calling it again
+  inside a route waits on an `end` event that has already fired, so the request hangs with
+  nothing logged and nothing written. Use the `form` in scope.
 - Panels are the parchment frame with the caps as pseudo-elements. A panel with padding
   smaller than the 27px cap hides its own contents; the library filter form vanished
   entirely that way. If a panel looks empty, check its padding before anything else.

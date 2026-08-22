@@ -12,9 +12,13 @@ What Paperback talks to, and how the extension gets installed.
   resets a chapter; `POST /api/pb/progress/upto` marks a chapter and everything below it
   read in one call.
 - `GET /api/pb/series/<id>/progress` returns the highest chapter marked read.
-- The extension declares `MANGA_TRACKING`, so Paperback shows read/unread controls and a
-  "read up to chapter N" form. Marking read reaches this ledger rather than staying on the
-  phone, which is what makes it survive a reinstall.
+- The extension declares `MANGA_TRACKING` and implements `MangaProgressProviding`, but
+  **Paperback never calls any of it.** Its own log shows why: a source's read state is
+  handled on the device by `ChapterProgressManager` with no request following, and the
+  thing that does call out is a tracker, installed from a separate trackers repository
+  (`paperback-ios.github.io/trackers-main`). A source cannot be a tracker by declaring an
+  intent. Read state is set from the Kupoyomi web UI instead. The extension keeps the
+  implementation because it costs nothing and works the day a source can be a tracker.
 - `/paperback/` serves the built extension as a Paperback repository.
 
 Chapters are addressed by **number**, never by a source's id, so a series that migrates

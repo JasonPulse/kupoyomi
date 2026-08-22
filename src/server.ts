@@ -15,6 +15,7 @@ import { confirmRemovalPage } from "./ui/remove.js";
 import { removeSeries } from "./remove.js";
 import { extensionsPage, setExtension } from "./ui/extensions.js";
 import { ASSETS } from "./ui/assets.js";
+import { serveBundle } from "./ui/pbrepo.js";
 import { refreshMetadata } from "./metadata.js";
 import { listSeries, getSeries, getChapters, getPages, getPage, setProgress, bindingAvailability } from "./pbapi.js";
 import { createReadStream } from "node:fs";
@@ -136,6 +137,15 @@ export async function serve(): Promise<void> {
     const redirect = (to: string): void => { res.writeHead(303, { location: to }); res.end(); };
 
     if (path === "/healthz") return send(200, { ok: true });
+
+    // The Paperback repository: add https://<host>/paperback/ as a source in the app.
+    if (path === "/paperback" || path.startsWith("/paperback/")) {
+      const file = serveBundle(path.replace(/^\/paperback/, ""));
+      if (!file) { res.writeHead(404, { "content-type": "text/plain" }); res.end("not in the bundle"); return; }
+      res.writeHead(200, { "content-type": file.type, "cache-control": "public, max-age=300" });
+      res.end(file.body);
+      return;
+    }
 
     const asset = ASSETS[path];
     if (asset) {

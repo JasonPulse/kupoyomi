@@ -3,3 +3,8 @@ dist/
 .git/
 *.log
 proposal*.json
+
+# the built extension bundle ships in the image; its build deps do not
+paperback-ext/node_modules/
+paperback-ext/tmp/
+paperback-ext/src/

@@ -3,3 +3,4 @@ dist/
 *.log
 proposal*.json
 .env
+decisions.tsv

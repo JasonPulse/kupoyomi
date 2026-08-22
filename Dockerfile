@@ -17,6 +17,8 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
 COPY db ./db
 COPY assets ./assets
+# The built Paperback extension, served at /paperback/ as a source repository.
+COPY paperback-ext/bundles ./paperback-ext/bundles
 USER node
 ENTRYPOINT ["node", "--enable-source-maps", "dist/index.js"]
 CMD ["report"]

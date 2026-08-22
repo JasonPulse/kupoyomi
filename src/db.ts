@@ -1,4 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -10,7 +11,22 @@ pg.types.setTypeParser(1082, (v: string) => v);
 import { config } from "./config.js";
 import type { Stranded } from "./match.js";
 
-const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "db");
+/**
+ * Migrations sit at the repo root, but this file's compiled location differs between the
+ * shipped build and the test build, so a single relative path only works in one of them.
+ * Walk up until a db/ holding the first migration turns up.
+ */
+const findMigrations = (): string => {
+  const override = process.env["MIGRATIONS_DIR"];
+  if (override) return override;
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 6; i++) {
+    const candidate = join(dir, "db");
+    if (existsSync(join(candidate, "001_init.sql"))) return candidate;
+    dir = dirname(dir);
+  }
+  throw new Error("cannot find the db/ migrations directory");
+};
 
 let pool: pg.Pool | undefined;
 export const db = (): pg.Pool => {
@@ -28,6 +44,7 @@ export async function migrate(): Promise<void> {
   const applied = new Set(
     (await p.query<{ filename: string }>("SELECT filename FROM schema_migrations")).rows.map((r) => r.filename),
   );
+  const migrationsDir = findMigrations();
   const files = (await readdir(migrationsDir)).filter((f) => f.endsWith(".sql")).sort();
   for (const f of files) {
     if (applied.has(f)) { console.log(`  skip ${f}`); continue; }

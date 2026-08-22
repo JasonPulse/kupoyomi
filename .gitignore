@@ -4,3 +4,4 @@ dist/
 proposal*.json
 .env
 decisions.tsv
+dist-test/

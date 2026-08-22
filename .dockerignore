@@ -8,3 +8,6 @@ proposal*.json
 paperback-ext/node_modules/
 paperback-ext/tmp/
 paperback-ext/src/
+dist-test/
+test/
+tsconfig.test.json

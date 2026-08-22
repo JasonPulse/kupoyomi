@@ -11,7 +11,8 @@
     "build": "tsc && node scripts/check-client-js.mjs",
     "kupo": "node --enable-source-maps dist/index.js",
     "dev": "tsc --watch",
-    "check": "node scripts/check-client-js.mjs"
+    "check": "node scripts/check-client-js.mjs",
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js"
   },
   "dependencies": {
     "pg": "^8.13.1"

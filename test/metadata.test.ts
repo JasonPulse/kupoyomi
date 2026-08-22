@@ -39,8 +39,19 @@ try {
 const SERIES = "Archived Test Series";
 const FOLDER = SERIES;
 const DIR = join(libraryRoot, FOLDER);
-// Distinguishable page bytes, so a wrong page produces a failure rather than a pass.
-const PAGE_ONE = Buffer.from("PAGE-ONE-BYTES");
+/** A real JPEG header of a given shape, with distinguishable trailing bytes so a wrong
+ *  page produces a failure rather than a pass. */
+const jpegOf = (w: number, h: number, tag: string): Buffer => Buffer.concat([
+  Buffer.from([0xff, 0xd8]),
+  Buffer.from([0xff, 0xc0, 0x00, 0x11, 0x08]),
+  Buffer.from([(h >> 8) & 0xff, h & 0xff, (w >> 8) & 0xff, w & 0xff]),
+  Buffer.alloc(8),
+  Buffer.from(tag),
+]);
+
+// Page one of a webtoon chapter is one enormous strip, which is unusable as cover art.
+const STRIP = jpegOf(720, 15560, "STRIP");
+const GOOD_PAGE = jpegOf(1000, 1400, "GOOD-PAGE");
 let seriesId = 0;
 
 before(async () => {
@@ -60,8 +71,8 @@ before(async () => {
   for (const n of [1, 2, 3]) {
     const file = join(DIR, `${SERIES} - c000${n}.cbz`);
     const pages = n === 1
-      ? [{ name: "001.jpg", data: PAGE_ONE }, { name: "002.jpg", data: Buffer.from("second") }]
-      : [{ name: "001.jpg", data: Buffer.from(`ch${n}`) }];
+      ? [{ name: "001.jpg", data: STRIP }, { name: "002.jpg", data: GOOD_PAGE }]
+      : [{ name: "001.jpg", data: jpegOf(1000, 1400, `later-ch${n}`) }];
     const extra = n === 1
       ? [{ name: "ComicInfo.xml", data: Buffer.from(comicInfo({
           series: SERIES, number: "1", pageCount: pages.length,
@@ -87,8 +98,9 @@ test("a series with no source binding still gets a cover and a synopsis", { skip
 
   const cover = join(DIR, "cover.jpg");
   assert.ok(existsSync(cover), "cover.jpg is written into the series folder");
-  assert.deepEqual(readFileSync(cover), PAGE_ONE,
-    "the cover is page one of the EARLIEST chapter, not of some later one");
+  assert.deepEqual(readFileSync(cover), GOOD_PAGE,
+    "the cover comes from the EARLIEST chapter, and is the page-shaped image rather than "
+    + "the 720x15560 strip that happens to be page one");
   assert.ok(!existsSync(join(DIR, ".cover.part")), "the temp file is renamed, never left behind");
 
   const row = (await db().query<{ cover_path: string | null; description: string | null }>(

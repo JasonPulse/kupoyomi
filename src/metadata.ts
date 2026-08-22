@@ -4,6 +4,7 @@ import { db } from "./db.js";
 import { gql } from "./suwayomi.js";
 import { resolveManga } from "./match.js";
 import { listEntries, pageEntries, readEntry } from "./unzip.js";
+import { imageSize, coverScore } from "./imgsize.js";
 
 const httpBase = (): string => config.suwayomiUrl.replace(/\/api\/graphql\/?$/, "");
 
@@ -38,11 +39,21 @@ async function localMetadata(seriesId: number, folder: string): Promise<{ cover:
     try {
       const entries = await listEntries(first.file_path);
       if (!cover) {
-        const page = pageEntries(entries)[0];
-        if (page) {
+        // The best-shaped of the first few pages rather than simply the first. On a
+        // webtoon every page is one long strip, and its title panel is usually the one
+        // page shaped anything like a cover.
+        let best: Buffer | null = null;
+        let bestScore = Infinity;
+        for (const page of pageEntries(entries).slice(0, 8)) {
+          const data = await readEntry(first.file_path, page);
+          const score = coverScore(imageSize(data));
+          if (score < bestScore) { bestScore = score; best = data; }
+          if (bestScore < 0.35) break;                   // close enough to a page shape
+        }
+        if (best) {
           mkdirSync(dir, { recursive: true });
           const tmp = `${dir}/.cover.part`;
-          writeFileSync(tmp, await readEntry(first.file_path, page));
+          writeFileSync(tmp, best);
           renameSync(tmp, `${dir}/cover.jpg`);
           cover = `${dir}/cover.jpg`;
         }

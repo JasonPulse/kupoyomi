@@ -84,3 +84,44 @@ test("numerics render without Postgres padding, and dates keep their year", () =
   assert.match(ago("2026-05-10", "2026-08-22"), /^2026-05-10 \(3mo ago\)$/);
   assert.equal(ago(null, "2026-08-22"), "-");
 });
+
+// --- image dimensions, for picking a cover ------------------------------------------
+const { imageSize, coverScore } = await import("../src/imgsize.js");
+
+test("JPEG dimensions are read from the SOF marker", () => {
+  // A minimal JPEG: SOI, an APP0 segment to be skipped, then SOF0 carrying 1000x1400.
+  const jpeg = Buffer.concat([
+    Buffer.from([0xff, 0xd8]),
+    Buffer.from([0xff, 0xe0, 0x00, 0x04, 0x00, 0x00]),           // APP0, length 4
+    Buffer.from([0xff, 0xc0, 0x00, 0x11, 0x08]),                 // SOF0, length 17, 8-bit
+    Buffer.from([0x05, 0x78, 0x03, 0xe8]),                       // height 1400, width 1000
+    Buffer.alloc(8),
+  ]);
+  assert.deepEqual(imageSize(jpeg), { width: 1000, height: 1400 });
+});
+
+test("PNG dimensions are read from IHDR", () => {
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from([0x00, 0x00, 0x00, 0x0d]), Buffer.from("IHDR"),
+    Buffer.from([0x00, 0x00, 0x02, 0xd0]),                       // width 720
+    Buffer.from([0x00, 0x00, 0x3c, 0xc8]),                       // height 15560
+    Buffer.alloc(8),
+  ]);
+  assert.deepEqual(imageSize(png), { width: 720, height: 15560 });
+});
+
+test("a comic page beats a webtoon strip as a cover", () => {
+  const page = coverScore({ width: 1000, height: 1400 });
+  const strip = coverScore({ width: 720, height: 15560 });
+  assert.ok(page < strip, `a page-shaped image must score better: ${page} vs ${strip}`);
+  assert.ok(page < 0.35, "a normal page is close enough to stop searching");
+  assert.equal(coverScore(null), 99, "an unreadable header loses to anything measurable");
+});
+
+test("garbage is not mistaken for an image", () => {
+  assert.equal(imageSize(Buffer.from("not an image at all, really")), null);
+  assert.equal(imageSize(Buffer.alloc(0)), null);
+  // A truncated JPEG must terminate rather than run off the end.
+  assert.equal(imageSize(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04])), null);
+});

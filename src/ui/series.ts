@@ -92,7 +92,6 @@ export async function seriesPage(id: number): Promise<string> {
          <span class="hint">adding one from search attaches it here instead of creating a second series</span></div>
        <div class="actions">
          <form method="post" action="/series/${id}/scan"><button class="weak" type="submit">check for new chapters</button></form>
-         <form method="post" action="/series/${id}/mute"><button class="weak" type="submit">${s.muted ? "unmute" : "mute"}</button></form>
          <form method="post" action="/series/${id}/metadata"><button class="weak" type="submit">refresh cover &amp; synopsis</button></form>
          <form method="post" action="/series/${id}/read" style="display:inline">
            <input type="hidden" name="chapter" value="${fmt(held[0] ?? null)}">
@@ -101,6 +100,23 @@ export async function seriesPage(id: number): Promise<string> {
          ${gaps.length > 0 ? `<a class="series" href="/series/${id}/gaps">fill ${gaps.length} gaps</a>` : ""}
          <span class="hint">${gaps.length > 0 ? `missing inside your range: ${gaps.slice(0, 18).join(", ")}${gaps.length > 18 ? " ..." : ""}` : "no gaps"}</span>
        </div>
+     </div>
+     <div class="card"><div class="title">Updates</div>
+       <div class="actions" style="margin:0">
+         <form method="post" action="/series/${id}/mute">
+           <button class="weak" type="submit">${s.muted ? "start checking again" : "stop getting updates"}</button></form>
+         <span class="hint">${s.muted
+           ? "Stopped. No new chapters are looked for, the queue is paused, no source is "
+             + "offered to migrate to, and it will never be flagged as gone quiet. Everything "
+             + "you hold stays, and it is still readable."
+           : "Checked every scan for new chapters, and flagged if its source goes quiet for "
+             + `${process.env["STALL_DAYS"] ?? 21} days. Stopping is for a series you have finished `
+             + "or given up on: nothing is deleted, and it stays readable."}</span>
+       </div>
+       ${wanted.length === 0 ? "" : `<div class="dim" style="margin-top:8px;font-size:12px">`
+         + `${wanted.length} chapters are queued. ${s.muted
+             ? "They are paused, and resume if you start checking again."
+             : "Stopping pauses them rather than discarding them."}</div>`}
      </div>
      <div class="card"><div class="title">Queue</div>
        <table><tr><th>chapter</th><th>state</th><th>last error</th></tr>${wantRows}</table></div>

@@ -100,7 +100,14 @@ const stats = async (): Promise<Record<string, unknown>> => {
     needs_review: await q("SELECT count(*) n FROM import_candidate WHERE match_kind = 'review' AND confirmed_series_id IS NULL"),
     stalled: await q("SELECT count(*) n FROM series WHERE stalled_since IS NOT NULL AND NOT muted"),
     extensions_desired: await q("SELECT count(*) n FROM extension WHERE desired"),
-    wanted_outstanding: await q("SELECT count(*) n FROM wanted WHERE state <> 'done'"),
+    // Split, because a paused row never moves and counting it as outstanding makes a
+    // healthy queue look permanently stuck.
+    wanted_outstanding: await q(
+      `SELECT count(*) n FROM wanted w JOIN series s ON s.id = w.series_id
+        WHERE w.state <> 'done' AND NOT s.muted`),
+    wanted_paused: await q(
+      `SELECT count(*) n FROM wanted w JOIN series s ON s.id = w.series_id
+        WHERE w.state <> 'done' AND s.muted`),
     wanted_failed: await q("SELECT count(*) n FROM wanted WHERE state = 'failed' AND attempts >= 4"),
     last_reconcile: lastReconcile,
     scheduler: schedState,
@@ -118,8 +125,11 @@ export async function serve(): Promise<void> {
   else console.log("scheduler: disabled by SCHEDULER=off");
   serverAbout().then((a) => console.log(`suwayomi ${a.version} (${a.revision})`)).catch(() => {});
 
+  // Resolves once. A second call on the same request would wait forever on an "end" that
+  // has already fired, which presents as a route that hangs rather than one that errors.
   const readBody = (req: import("node:http").IncomingMessage): Promise<string> =>
     new Promise((resolve) => {
+      if (req.readableEnded) { resolve(""); return; }
       let b = "";
       req.on("data", (c) => { b += c; });
       req.on("end", () => resolve(b));
@@ -386,7 +396,10 @@ export async function serve(): Promise<void> {
         if (meta) { await refreshMetadata(Number(meta[1])); return `/series/${meta[1]}`; }
         const read = /^\/series\/(\d+)\/read$/.exec(path);
         if (read) {
-          const chapter = new URLSearchParams(await readBody(req)).get("chapter")?.trim() ?? "";
+          // form, not readBody: the body is consumed once at the top of this handler, and
+          // reading it again waits on an "end" event that has already fired, so the
+          // request hangs until the client gives up.
+          const chapter = (form.get("chapter") ?? "").trim();
           // A blank box is not a request to mark nothing read, it is a mistake, so it
           // does nothing rather than quietly marking chapter 0.
           if (chapter) await setProgressUpTo(Number(read[1]), chapter);

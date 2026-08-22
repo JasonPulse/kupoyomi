@@ -76,6 +76,10 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
        JOIN series_binding b ON b.id = w.binding_id
        JOIN series s ON s.id = w.series_id
       WHERE w.state IN ('pending','failed','fetching') AND w.attempts < 4
+        -- A muted series is one the owner has told to stop. A backlog that keeps
+        -- trickling in for weeks afterwards is still updates arriving, so it pauses
+        -- here rather than being deleted, and unmuting resumes exactly where it stopped.
+        AND NOT s.muted
       ORDER BY s.title, w.chapter_number
       ${opts.limit ? `LIMIT ${Number(opts.limit)}` : ""}`)).rows;
   if (rows.length === 0) { console.log("nothing queued"); return; }

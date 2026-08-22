@@ -1,5 +1,6 @@
 import { db } from "./db.js";
 import { scanWanted, fetchWanted } from "./fetch.js";
+import { refreshAllMetadata } from "./metadata.js";
 
 const hours = (n: number): number => n * 3600_000;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -12,6 +13,7 @@ export type SchedulerState = {
   lastScan?: { at: string; error?: string };
   lastFetch?: { at: string; downloaded: number; failed: number; error?: string };
   lastStallCheck?: { at: string; flagged: number };
+  lastMetadata?: { at: string; error?: string };
   outstanding?: number;
 };
 export const state: SchedulerState = {};
@@ -24,6 +26,7 @@ export const state: SchedulerState = {};
  */
 let scanning = false;
 let fetching = false;
+let metadata = false;
 
 /**
  * Notifies once per event. A stalled series that keeps being stalled is not news, so
@@ -154,6 +157,25 @@ export function startScheduler(): void {
     }
   })();
 
+  // Covers and synopses used to arrive only when someone remembered to run the command,
+  // so a newly added series sat blank in the library and in Paperback until then. The
+  // pass only touches series actually missing one, which is nothing most of the time.
+  void (async () => {
+    await sleep(60_000);                 // after the first scan, so new series are in
+    for (;;) {
+      try {
+        if (!metadata) {
+          metadata = true;
+          await refreshAllMetadata({ limit: num("METADATA_BATCH", 20) });
+          state.lastMetadata = { at: new Date().toISOString() };
+        }
+      } catch (err) {
+        state.lastMetadata = { at: new Date().toISOString(), error: err instanceof Error ? err.message : String(err) };
+      } finally { metadata = false; }
+      await sleep(hours(num("METADATA_INTERVAL_HOURS", 6)));
+    }
+  })();
+
   void (async () => {
     for (;;) {
       try {
@@ -166,5 +188,6 @@ export function startScheduler(): void {
 
   console.log(`scheduler: scan every ${num("SCAN_INTERVAL_HOURS", 6)}h, ` +
     `fetch ${batch} chapters every ${num("FETCH_INTERVAL_MINUTES", 15)}m across ${concurrency} sources, ` +
-    `stall check every ${num("STALL_INTERVAL_HOURS", 24)}h`);
+    `stall check every ${num("STALL_INTERVAL_HOURS", 24)}h, ` +
+    `metadata every ${num("METADATA_INTERVAL_HOURS", 6)}h`);
 }

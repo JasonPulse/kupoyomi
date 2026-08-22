@@ -474,7 +474,7 @@ const types_1 = require("@paperback/types");
  * of the server and is worth preserving in the client.
  */
 exports.KupoyomiInfo = {
-    version: "1.0.0",
+    version: "1.1.0",
     name: "Kupoyomi",
     icon: "icon.png",
     author: "Jason Clift",
@@ -483,9 +483,16 @@ exports.KupoyomiInfo = {
     contentRating: types_1.ContentRating.ADULT,
     websiteBaseURL: "https://kupoyomi.network-gnomes.com",
     sourceTags: [],
-    intents: types_1.SourceIntents.MANGA_CHAPTERS | types_1.SourceIntents.HOMEPAGE_SECTIONS | types_1.SourceIntents.SETTINGS_UI,
+    // MANGA_TRACKING is what puts the read/unread controls and the progress form in front
+    // of the user. Without it Paperback treats read state as its own private business and
+    // the server's progress ledger is write-only from the client's side.
+    intents: types_1.SourceIntents.MANGA_CHAPTERS | types_1.SourceIntents.MANGA_TRACKING
+        | types_1.SourceIntents.HOMEPAGE_SECTIONS | types_1.SourceIntents.SETTINGS_UI,
 };
 const DEFAULT_URL = "https://kupoyomi.network-gnomes.com";
+/** How many tiles a View More page hands back. Enough to fill a screen, small enough
+ *  that a 4,000-chapter library does not arrive as one response. */
+const PAGE_SIZE = 60;
 class Kupoyomi {
     constructor() {
         this.stateManager = App.createSourceStateManager();
@@ -526,6 +533,18 @@ class Kupoyomi {
         }
         return JSON.parse(response.data);
     }
+    async postJson(path, payload) {
+        const base = await this.baseUrl();
+        const response = await this.requestManager.schedule(App.createRequest({
+            url: `${base}${path}`, method: "POST",
+            headers: { "content-type": "application/json" },
+            data: JSON.stringify(payload),
+        }), 1);
+        if (response.status < 200 || response.status >= 300) {
+            throw new Error(`Kupoyomi returned ${response.status} for ${path}`);
+        }
+        return JSON.parse(response.data);
+    }
     async getMangaDetails(mangaId) {
         const s = await this.getJson(`/api/pb/series/${encodeURIComponent(mangaId)}`);
         const base = await this.baseUrl();
@@ -535,7 +554,10 @@ class Kupoyomi {
                 titles: [s.title],
                 image: s.cover ? `${base}${s.cover}` : "",
                 status: s.status === "COMPLETED" ? "Completed" : "Ongoing",
-                desc: s.description ?? "",
+                // An empty desc renders as nothing at all, which reads as a broken extension
+                // rather than as a series whose source never published a synopsis. Say so.
+                desc: s.description ?? `No synopsis on file. ${s.chapters} chapter${s.chapters === 1 ? "" : "s"} held`
+                    + `${s.lastUpload ? `, newest ${s.lastUpload}` : ""}.`,
                 author: "",
                 artist: "",
                 hentai: false,
@@ -577,42 +599,127 @@ class Kupoyomi {
             })),
         });
     }
-    /** Required by the interface. Both sections send everything at once, so there is no
-     *  further page to hand back -- an empty result is the honest answer. */
-    async getViewMoreItems(homepageSectionId, _metadata) {
+    /**
+     * The View More page, which is the only place in Paperback that lays titles out as a
+     * scrollable grid rather than a single sideways row. Both sections are marked as having
+     * more items so that page is reachable at all; a section that claims to be complete
+     * gets no way in, and a library of forty titles is unusable one swipe at a time.
+     */
+    async getViewMoreItems(homepageSectionId, metadata) {
+        const page = Number(metadata?.page ?? 0);
         const series = await this.getJson("/api/pb/series");
-        const base = await this.baseUrl();
         const ordered = homepageSectionId === "all"
             ? [...series].sort((a, b) => a.title.localeCompare(b.title))
             : series;
+        const slice = ordered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+        const base = await this.baseUrl();
         return App.createPagedResults({
-            results: ordered.map((s) => App.createPartialSourceManga({
-                mangaId: s.id, title: s.title,
-                image: s.cover ? `${base}${s.cover}` : "",
-                subtitle: `${s.chapters} chapters`,
-            })),
+            results: slice.map((s) => this.tile(s, base)),
+            // Undefined metadata is how the app is told to stop asking. Returning a page
+            // number past the end instead makes it loop on an empty response forever.
+            metadata: (page + 1) * PAGE_SIZE < ordered.length ? { page: page + 1 } : undefined,
+        });
+    }
+    tile(s, base) {
+        return App.createPartialSourceManga({
+            mangaId: s.id,
+            title: s.title,
+            image: s.cover ? `${base}${s.cover}` : "",
+            subtitle: `${s.chapters} chapter${s.chapters === 1 ? "" : "s"}`,
         });
     }
     async getHomePageSections(sectionCallback) {
         // Sections are announced empty first so the app can lay them out, then filled.
         const recent = App.createHomeSection({
-            id: "recent", title: "Recently updated", containsMoreItems: false, type: types_1.HomeSectionType.singleRowNormal,
+            id: "recent", title: "Recently updated", containsMoreItems: true, type: types_1.HomeSectionType.singleRowNormal,
         });
         sectionCallback(recent);
         const series = await this.getJson("/api/pb/series");
         const base = await this.baseUrl();
-        const tile = (s) => App.createPartialSourceManga({
-            mangaId: s.id, title: s.title,
-            image: s.cover ? `${base}${s.cover}` : "",
-            subtitle: `${s.chapters} chapters`,
-        });
-        recent.items = series.slice(0, 24).map(tile);
+        recent.items = series.slice(0, 24).map((s) => this.tile(s, base));
         sectionCallback(recent);
         const all = App.createHomeSection({
-            id: "all", title: "Everything", containsMoreItems: false, type: types_1.HomeSectionType.singleRowNormal,
+            id: "all", title: "Everything", containsMoreItems: true, type: types_1.HomeSectionType.singleRowNormal,
         });
-        all.items = [...series].sort((a, b) => a.title.localeCompare(b.title)).map(tile);
+        all.items = [...series].sort((a, b) => a.title.localeCompare(b.title))
+            .slice(0, PAGE_SIZE).map((s) => this.tile(s, base));
         sectionCallback(all);
+    }
+    // --- Read state -----------------------------------------------------------------
+    // Progress lives on the server, so it survives reinstalling the app and follows the
+    // series through a source migration. Chapter ids are numbers, which is what makes that
+    // work: nothing here refers to a source's own chapter id.
+    async getMangaProgress(mangaId) {
+        const { lastReadChapter } = await this.getJson(`/api/pb/series/${encodeURIComponent(mangaId)}/progress`);
+        if (lastReadChapter === null)
+            return undefined;
+        return App.createMangaProgress({ mangaId, lastReadChapterNumber: lastReadChapter });
+    }
+    /**
+     * Paperback batches "mark as read" into a queue and hands it over here. Each action is
+     * discarded once the server has it and retried otherwise, so a phone that was offline
+     * catches up instead of losing the marks.
+     */
+    async processChapterReadActionQueue(actionQueue) {
+        for (const action of await actionQueue.queuedChapterReadActions()) {
+            try {
+                await this.postJson("/api/pb/progress", {
+                    seriesId: Number(action.mangaId),
+                    chapter: action.sourceChapterId,
+                    completed: true,
+                });
+                await actionQueue.discardChapterReadAction(action);
+            }
+            catch {
+                await actionQueue.retryChapterReadAction(action);
+            }
+        }
+    }
+    /**
+     * The form behind "manage progress" on a series. One number: the chapter you have
+     * already read up to. Submitting marks everything at or below it read in a single
+     * request, which is the only sane way to handle a series you read somewhere else before
+     * this library existed.
+     */
+    async getMangaProgressManagementForm(mangaId) {
+        const chapters = await this.getJson(`/api/pb/series/${encodeURIComponent(mangaId)}/chapters`);
+        const highest = chapters.length > 0 ? Math.max(...chapters.map((c) => c.number)) : 0;
+        const { lastReadChapter } = await this.getJson(`/api/pb/series/${encodeURIComponent(mangaId)}/progress`);
+        let target = lastReadChapter ?? 0;
+        return App.createDUIForm({
+            sections: async () => [
+                App.createDUISection({
+                    id: "progress",
+                    header: "Read up to",
+                    footer: `Marks every chapter at or below this number as read. ${highest} is the newest held.`,
+                    isHidden: false,
+                    rows: async () => [
+                        App.createDUIStepper({
+                            id: "lastRead",
+                            label: "Chapter",
+                            min: 0,
+                            max: highest,
+                            step: 1,
+                            value: App.createDUIBinding({
+                                get: async () => target,
+                                set: async (newValue) => { target = newValue; },
+                            }),
+                        }),
+                    ],
+                }),
+            ],
+            onSubmit: async (values) => {
+                const upto = Number(values["lastRead"] ?? target);
+                if (!(upto > 0))
+                    return;
+                // The chapter id is the number formatted the way the ledger stores it, because
+                // that is the key the server looks up.
+                await this.postJson("/api/pb/progress/upto", {
+                    seriesId: Number(mangaId),
+                    chapter: upto.toFixed(4),
+                });
+            },
+        });
     }
 }
 exports.Kupoyomi = Kupoyomi;

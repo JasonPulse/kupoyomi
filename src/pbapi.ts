@@ -109,6 +109,35 @@ export async function setProgress(seriesId: number, chapter: string, page: numbe
 }
 
 /**
+ * Marks everything up to and including a chapter as read, in one call.
+ *
+ * The case this exists for is a series you read elsewhere before Kupoyomi existed: two
+ * hundred chapters, and no reader offers to mark them one at a time. Returns how many
+ * rows it moved, so the caller can say something true about what happened.
+ */
+export async function setProgressUpTo(seriesId: number, chapter: string): Promise<number> {
+  const r = await db().query(
+    `INSERT INTO read_progress (series_id, chapter_number, last_page, completed, updated_at)
+     SELECT c.series_id, c.chapter_number, COALESCE(c.page_count, 0), true, now()
+       FROM chapter c
+      WHERE c.series_id = $1 AND c.chapter_number <= $2
+     ON CONFLICT (series_id, chapter_number)
+       DO UPDATE SET last_page = GREATEST(read_progress.last_page, EXCLUDED.last_page),
+                     completed = true, updated_at = now()`,
+    [seriesId, chapter]);
+  return r.rowCount ?? 0;
+}
+
+/** Highest chapter marked read, which is what a tracker wants to know. */
+export const lastReadChapter = async (seriesId: number): Promise<number | null> => {
+  const r = await db().query<{ n: string | null }>(
+    `SELECT max(chapter_number)::text AS n FROM read_progress
+      WHERE series_id = $1 AND completed`, [seriesId]);
+  const n = r.rows[0]?.n;
+  return n === null || n === undefined ? null : Number(n);
+};
+
+/**
  * What one binding currently offers, against what the series already holds.
  *
  * Loaded per binding from the page rather than up front: each answer is a live request to

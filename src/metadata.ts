@@ -1,8 +1,9 @@
-import { writeFileSync, mkdirSync, renameSync } from "node:fs";
+import { writeFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { gql } from "./suwayomi.js";
 import { resolveManga } from "./match.js";
+import { listEntries, pageEntries, readEntry } from "./unzip.js";
 
 const httpBase = (): string => config.suwayomiUrl.replace(/\/api\/graphql\/?$/, "");
 
@@ -13,6 +14,56 @@ const httpBase = (): string => config.suwayomiUrl.replace(/\/api\/graphql\/?$/, 
  * and anything else look for. That is the whole of komf's job in this stack, so owning it
  * here is what lets komf go.
  */
+/**
+ * Cover and synopsis taken from the files themselves, needing no source at all.
+ *
+ * An archived series has no binding by design -- there will never be another chapter, so
+ * there is nothing for a binding to receive. That left it permanently without cover art,
+ * because every route to a cover went through a source. The first page of the earliest
+ * chapter is a cover: it is what the scanlator put there, and it is on disk already.
+ */
+async function localMetadata(seriesId: number, folder: string): Promise<{ cover: string | null; description: string | null }> {
+  const dir = `${config.libraryRoot}/${folder}`;
+  const first = (await db().query<{ file_path: string }>(
+    "SELECT file_path FROM chapter WHERE series_id = $1 ORDER BY chapter_number LIMIT 1",
+    [seriesId])).rows[0];
+
+  let cover: string | null = null;
+  // A cover.jpg already sitting in the folder is either ours from a previous run or one
+  // komf left behind. Either way it is a real cover, so adopt it rather than redo it.
+  if (existsSync(`${dir}/cover.jpg`)) cover = `${dir}/cover.jpg`;
+
+  let description: string | null = null;
+  if (first) {
+    try {
+      const entries = await listEntries(first.file_path);
+      if (!cover) {
+        const page = pageEntries(entries)[0];
+        if (page) {
+          mkdirSync(dir, { recursive: true });
+          const tmp = `${dir}/.cover.part`;
+          writeFileSync(tmp, await readEntry(first.file_path, page));
+          renameSync(tmp, `${dir}/cover.jpg`);
+          cover = `${dir}/cover.jpg`;
+        }
+      }
+      // Suwayomi wrote a ComicInfo.xml into most adopted files, and its Summary is the
+      // synopsis the source had at download time. Stale beats blank.
+      const ci = entries.find((e) => /^comicinfo\.xml$/i.test(e.name));
+      if (ci) {
+        const xml = (await readEntry(first.file_path, ci)).toString("utf8");
+        const m = /<Summary>([\s\S]*?)<\/Summary>/i.exec(xml);
+        if (m?.[1]) {
+          description = m[1]
+            .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+            .replace(/&apos;/g, "'").replace(/&amp;/g, "&").trim() || null;
+        }
+      }
+    } catch { /* an unreadable archive is not worth failing the refresh over */ }
+  }
+  return { cover, description };
+}
+
 export async function refreshMetadata(seriesId: number): Promise<{ cover: boolean; description: boolean }> {
   const p = db();
   const s = (await p.query<{ title: string; folder: string }>(
@@ -21,7 +72,17 @@ export async function refreshMetadata(seriesId: number): Promise<{ cover: boolea
   const b = (await p.query<{ source_id: string; source_url: string | null }>(
     "SELECT source_id, source_url FROM series_binding WHERE series_id = $1 AND role = 'primary'",
     [seriesId])).rows[0];
-  if (!b?.source_url) return { cover: false, description: false };
+
+  // No binding means an archived series, and it used to return here empty-handed. The
+  // files are still on disk, so there is no reason for it to have no cover.
+  if (!b?.source_url) {
+    const local = await localMetadata(seriesId, s.folder);
+    await p.query(
+      `UPDATE series SET description = COALESCE(description, $2),
+         cover_path = COALESCE($3, cover_path), metadata_at = now() WHERE id = $1`,
+      [seriesId, local.description, local.cover]);
+    return { cover: local.cover !== null, description: local.description !== null };
+  }
 
   const mangaId = await resolveManga(b.source_id, s.title, b.source_url);
   await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:false,fetchManga:true}){ clientMutationId } }`,
@@ -46,26 +107,37 @@ export async function refreshMetadata(seriesId: number): Promise<{ cover: boolea
     } catch { /* a missing cover is not worth failing the refresh over */ }
   }
 
+  // A source that answers without a thumbnail, or whose image host is down, must not
+  // leave the series blank when the first page is sitting right there.
+  let localDesc: string | null = null;
+  if (!coverPath || !d.description) {
+    const local = await localMetadata(seriesId, s.folder);
+    coverPath = coverPath ?? local.cover;
+    localDesc = local.description;
+  }
+
   await p.query(
-    `UPDATE series SET description = COALESCE($2, description),
+    `UPDATE series SET description = COALESCE($2, description, $5),
        cover_path = COALESCE($3, cover_path),
        status = CASE WHEN $4 <> 'UNKNOWN' THEN $4 ELSE status END,
        metadata_at = now() WHERE id = $1`,
-    [seriesId, d.description, coverPath, d.status]);
-  return { cover: coverPath !== null, description: !!d.description };
+    [seriesId, d.description, coverPath, d.status, localDesc]);
+  return { cover: coverPath !== null, description: !!(d.description ?? localDesc) };
 }
 
 
 /**
  * Fills in covers and synopses for series that have none. Paced, because each one is a
  * search plus a fetch against a real site, and there is no hurry.
+ *
+ * Every series is eligible, including archived ones with no binding: those are answered
+ * from their own files. Requiring a binding here is what left archived series blank.
  */
 export async function refreshAllMetadata(opts: { force?: boolean; limit?: number } = {}): Promise<void> {
   const p = db();
   const rows = (await p.query<{ id: number; title: string }>(
     `SELECT s.id, s.title FROM series s
       WHERE ${opts.force ? "TRUE" : "(s.cover_path IS NULL OR s.description IS NULL)"}
-        AND EXISTS (SELECT 1 FROM series_binding b WHERE b.series_id = s.id AND b.role = 'primary')
       ORDER BY s.title ${opts.limit ? `LIMIT ${Number(opts.limit)}` : ""}`)).rows;
   console.log(`${rows.length} series need metadata`);
   let cover = 0, desc = 0, failed = 0;

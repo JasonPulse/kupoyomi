@@ -19,7 +19,7 @@ import { extensionsPage, setExtension } from "./ui/extensions.js";
 import { ASSETS } from "./ui/assets.js";
 import { serveBundle } from "./ui/pbrepo.js";
 import { refreshMetadata } from "./metadata.js";
-import { listSeries, getSeries, getChapters, getPages, getPage, setProgress, clearProgress, bindingAvailability } from "./pbapi.js";
+import { listSeries, getSeries, getChapters, getPages, getPage, setProgress, setProgressUpTo, clearProgress, lastReadChapter, bindingAvailability } from "./pbapi.js";
 import { createReadStream } from "node:fs";
 import { scanWanted } from "./fetch.js";
 import { startScheduler, state as schedState, checkStalled } from "./schedule.js";
@@ -189,6 +189,10 @@ export async function serve(): Promise<void> {
           const s = await getSeries(Number(parts[1]));
           return s ? send(200, s) : send(404, { error: "no such series" });
         }
+        if (parts[0] === "series" && parts[1] && parts[2] === "progress") {
+          const n = await lastReadChapter(Number(parts[1]));
+          return send(200, { lastReadChapter: n });
+        }
         if (parts[0] === "series" && parts[1] && parts[2] === "chapters") {
           return send(200, await getChapters(Number(parts[1])));
         }
@@ -211,6 +215,16 @@ export async function serve(): Promise<void> {
           res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "public, max-age=3600" });
           createReadStream(cp).on("error", () => { res.writeHead(404); res.end(); }).pipe(res);
           return;
+        }
+        if (parts[0] === "progress" && parts[1] === "upto" && req.method === "POST") {
+          const body = await readBody(req);
+          const f = new URLSearchParams(body);
+          const j = body.trim().startsWith("{") ? JSON.parse(body) as Record<string, unknown> : null;
+          const seriesId = Number(j?.["seriesId"] ?? f.get("seriesId"));
+          const chapter = String(j?.["chapter"] ?? f.get("chapter") ?? "");
+          if (!Number.isInteger(seriesId) || !chapter) return send(400, { error: "seriesId and chapter required" });
+          const marked = await setProgressUpTo(seriesId, chapter);
+          return send(200, { ok: true, marked });
         }
         if (parts[0] === "progress" && parts[1] === "clear" && req.method === "POST") {
           const body = await readBody(req);

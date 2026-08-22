@@ -49,18 +49,27 @@ value, because progress ratchets forward and cannot be lowered.
 ## Stopping updates
 
 The Updates section on a series page. Stopping (the `muted` flag) means: no scan for new
-chapters, the existing queue pauses, no migration candidates offered, never flagged as gone
-quiet. Nothing is deleted and it stays readable. Paused rows are reported separately from
-outstanding in `/api/stats`, on `/queue`, and in the scheduler's count, because a row that
-will never move should not read as work remaining.
+chapters, its outstanding queue entries are deleted, no migration candidates offered, never
+flagged as gone quiet. No file is deleted and it stays readable.
+
+**The invariant is that a stopped series contributes nothing to the queue.** Not a paused
+bucket, not a filtered view, no rows. Parking them was tried and rejected: 56 entries
+nothing would ever act on made the queue unreadable. Nothing is lost, because entries are
+derived from what the source carries.
 
 ```bash
-curl -s https://kupoyomi.network-gnomes.com/api/stats |
-  python3 -c "import json,sys;d=json.load(sys.stdin);print(d['wanted_outstanding'],d['wanted_paused'])"
+$D sql "SELECT count(*) FROM wanted w JOIN series s ON s.id=w.series_id
+        WHERE s.muted AND w.state <> 'done'"     # must be 0
 ```
 
-Driving it writes to the owner's library, so mute and unmute in the same breath and check
-the counts return to where they started.
+Driving it writes to the owner's library, so stop and start in the same breath, and finish
+with a scan so the backlog comes back:
+
+```bash
+curl -s -X POST .../series/68/mute    # stops it and drops its entries
+curl -s -X POST .../series/68/mute    # starts it again
+curl -s -X POST .../series/68/scan    # rebuilds what is still missing
+```
 
 ## Gotchas
 

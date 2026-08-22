@@ -15,6 +15,8 @@ type CandRow = {
 };
 type CmpRow = {
   candidate_id: number; manga_id: number; source_name: string; source_url: string | null; chapters: number;
+  /** True when this candidate is the very source the files were stranded under. */
+  is_original?: boolean;
   range_lo: string | null; range_hi: string | null; gaps: number;
   latest: Array<{ chapter: number | null; uploaded: string; scanlator: string | null }>; note: string | null;
   new_count: number | null; lost_count: number | null; last_upload: string | null;
@@ -103,7 +105,11 @@ export async function reviewPage(): Promise<string> {
     const offersSomething = (o: CmpRow): boolean => (o.new_beyond ?? 0) > 0;
     const viable = (o: CmpRow): boolean => carries(o) && offersSomething(o);
     const usable = opts.filter(viable);
-    const best = [...usable].sort((a, b) =>
+    // A source that went away and came back is the best possible target: the files were
+    // produced by it, so its numbering matches by construction. That is a restoration,
+    // not a migration, and it should not be buried among the alternatives.
+    const returned = usable.find((o) => o.source_name === k.dead_source);
+    const best = returned ?? [...usable].sort((a, b) =>
       (b.new_beyond ?? 0) - (a.new_beyond ?? 0) ||
       (b.fills_gaps ?? 0) - (a.fills_gaps ?? 0) ||
       (a.not_carried ?? 0) - (b.not_carried ?? 0))[0];
@@ -126,7 +132,9 @@ export async function reviewPage(): Promise<string> {
             ? `<div class="dim" style="font-size:11px">${esc(o.source_url.slice(0, 44))}</div>` : "";
           const groups = [...new Set((o.latest ?? []).map((l) => l.scanlator).filter(Boolean))].join(", ");
           return `<tr>
-            <td class="${good ? "rec" : ""}">${esc(o.source_name)}${o === best ? " &larr; best" : ""}${slug}</td>
+            <td class="${good ? "rec" : ""}">${esc(o.source_name)}${
+              o.source_name === k.dead_source ? ' <span class="badge">original source, back</span>'
+                : o === best ? " &larr; best" : ""}${slug}</td>
             <td>${fmt(o.range_lo)}&ndash;${fmt(o.range_hi)} <span class="dim">(${o.chapters})</span></td>
             <td class="${beyond > 0 ? "rec" : "dim"}"><b>${beyond > 0 ? `+${beyond}` : "0"}</b></td>
             <td class="${fills > 0 ? "rec" : "dim"}">${fills > 0 ? `+${fills}` : "0"}</td>
@@ -145,7 +153,8 @@ export async function reviewPage(): Promise<string> {
 
     return `<div class="card">
       <div class="title">${esc(title)} ${statusBadge(k.status)}</div>
-      <div class="meta">${yours} &middot; stranded under ${esc(k.dead_source ?? "-")}</div>
+      <div class="meta">${yours} &middot; stranded under ${esc(k.dead_source ?? "-")}${
+        returned ? ' &middot; <span class="rec">that source is installable again, so re-binding to it restores the run exactly</span>' : ""}</div>
       <table><tr><th>source</th><th>their range</th>
         <th title="chapters past your highest">new releases</th>
         <th title="holes inside your range this source could fill">fills gaps</th>

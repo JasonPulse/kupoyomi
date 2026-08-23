@@ -21,7 +21,7 @@ import { serveBundle } from "./ui/pbrepo.js";
 import { refreshMetadata } from "./metadata.js";
 import { listSeries, getSeries, getChapters, getPages, getPage, setProgress, setProgressUpTo, clearProgress, lastReadChapter, bindingAvailability } from "./pbapi.js";
 import { createReadStream } from "node:fs";
-import { scanWanted } from "./fetch.js";
+import { scanWanted, reclaimStuck } from "./fetch.js";
 import { startScheduler, state as schedState, checkStalled } from "./schedule.js";
 
 /**
@@ -116,6 +116,10 @@ export async function serve(): Promise<void> {
   // whether Suwayomi is answering yet, or the probe cannot tell "still booting"
   // from "broken".
   void bootstrapLoop();
+  // Nothing can own a "fetching" row before this process starts, so every one of them
+  // is a leftover. Rolling the pod mid-chapter used to leave a row claiming to be
+  // downloading indefinitely.
+  void reclaimStuck(0).catch(() => undefined);
   if (process.env["SCHEDULER"] !== "off") startScheduler();
   else console.log("scheduler: disabled by SCHEDULER=off");
   serverAbout().then((a) => console.log(`suwayomi ${a.version} (${a.revision})`)).catch(() => {});

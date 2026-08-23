@@ -149,3 +149,49 @@ test("a decimal inside the range is still not treated as a gap", { skip: !haveDb
     "whole chapters only, and 12.2 is not invented as missing");
   await p.query("DELETE FROM series WHERE id = $1", [id]);
 });
+
+/**
+ * Rows left mid-download by a process that is gone.
+ *
+ * "fetching" means a process owns the row. After a restart that is false for all of them,
+ * and a pod rolled at page 33 of 46 left a row claiming to be downloading for as long as
+ * anyone cared to look: the downloads page showed it in flight and nothing was working it.
+ */
+const { reclaimStuck } = await import("../src/fetch.js");
+
+test("a restart releases rows nothing is working any more", { skip: !haveDb }, async () => {
+  const p = db();
+  const id = ids.get("Zebra Chronicle")!;
+  const b = (await p.query<{ id: number }>(
+    "SELECT id FROM series_binding WHERE series_id = $1", [id])).rows[0]!;
+
+  // One abandoned two minutes ago, one abandoned an hour ago.
+  await p.query(
+    `UPDATE wanted SET state='fetching', pages_done=33, pages_total=46,
+       started_at = now() - interval '2 minutes' WHERE series_id=$1 AND chapter_number=1`, [id]);
+  await p.query(
+    `UPDATE wanted SET state='fetching', pages_done=5, pages_total=20,
+       started_at = now() - interval '60 minutes' WHERE series_id=$1 AND chapter_number=2`, [id]);
+
+  // A tick uses a threshold, so it must not reclaim a row a live run just claimed.
+  assert.equal(await reclaimStuck(30), 1, "only the hour-old row is stale to a running tick");
+  const fresh = (await p.query<{ state: string; pages_done: number }>(
+    "SELECT state, pages_done FROM wanted WHERE series_id=$1 AND chapter_number=1", [id])).rows[0]!;
+  assert.equal(fresh.state, "fetching", "the two-minute-old row is left alone");
+  assert.equal(fresh.pages_done, 33, "and its progress is untouched");
+
+  // Startup passes 0, because nothing can own a row before the process exists.
+  assert.equal(await reclaimStuck(0), 1, "startup releases the rest");
+  const both = (await p.query<{ state: string; pages_done: number; pages_total: number | null; started_at: string | null }>(
+    "SELECT state, pages_done, pages_total, started_at::text FROM wanted WHERE series_id=$1 AND chapter_number IN (1,2)", [id])).rows;
+  assert.equal(both.length, 2);
+  for (const r of both) {
+    assert.equal(r.state, "pending", "released rows are queued again, not failed");
+    assert.equal(r.pages_done, 0, "stale progress is cleared so the page cannot show it");
+    assert.equal(r.pages_total, null);
+    assert.equal(r.started_at, null);
+  }
+  assert.equal(await reclaimStuck(0), 0, "nothing left to release, and running it again is harmless");
+
+  await p.query("UPDATE wanted SET state='pending' WHERE series_id=$1", [id]);
+});

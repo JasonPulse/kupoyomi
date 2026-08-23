@@ -100,6 +100,30 @@ export async function nextWanted(limit?: number, blockSize?: number): Promise<Wa
 }
 
 /**
+ * Releases chapters left mid-download by a process that is no longer running.
+ *
+ * "fetching" means a process owns this row, and after a restart that is false for every
+ * one of them. A pod rolled at 33 of 46 pages left a row claiming to be downloading for
+ * as long as anyone cared to look at it: the downloads page showed it in flight with a
+ * lifetime counting up, and nothing was doing anything.
+ *
+ * `olderThan` of 0 clears every one, which is right at startup because nothing can own a
+ * row before the process begins. A tick passes a threshold instead, so a run in progress
+ * is never reclaimed out from under itself; that also recovers a genuinely wedged fetch
+ * without needing a restart.
+ */
+export async function reclaimStuck(olderThanMinutes = 0): Promise<number> {
+  const r = await db().query(
+    `UPDATE wanted SET state = 'pending', pages_done = 0, pages_total = NULL, started_at = NULL
+      WHERE state = 'fetching'
+        AND (started_at IS NULL OR started_at < now() - ($1 || ' minutes')::interval)`,
+    [String(Math.max(0, olderThanMinutes))]);
+  const n = r.rowCount ?? 0;
+  if (n > 0) console.log(`released ${n} chapter${n === 1 ? "" : "s"} left mid-download by a process that is gone`);
+  return n;
+}
+
+/**
  * Downloads queued chapters.
  *
  * One source at a time within a source, several sources in parallel: the same shape as
@@ -110,6 +134,9 @@ export async function nextWanted(limit?: number, blockSize?: number): Promise<Wa
 export async function fetchWanted(opts: { limit?: number; concurrency?: number } = {}): Promise<void> {
   const p = db();
   const concurrency = opts.concurrency ?? 6;
+  // Before selecting, so a row abandoned by an earlier process is a candidate again
+  // rather than sitting in "fetching" until somebody notices.
+  await reclaimStuck(Number(process.env["FETCH_STUCK_MINUTES"] ?? 30));
   const rows = await nextWanted(opts.limit);
   if (rows.length === 0) { console.log("nothing queued"); return; }
 

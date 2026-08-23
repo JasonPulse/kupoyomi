@@ -1,5 +1,6 @@
 import { db } from "./db.js";
-import { gql, installedSources, sanitize } from "./suwayomi.js";
+import { gql, sanitize } from "./suwayomi.js";
+import { usableSources } from "./paid.js";
 import { queryVariants } from "./match.js";
 
 const SEARCH = `mutation($src:LongString!,$q:String!){
@@ -65,7 +66,7 @@ export async function findGapSources(seriesId: number, concurrency = 6): Promise
   if (gaps.unsupplied.length === 0) return [];
   const want = new Set(gaps.unsupplied);
 
-  const sources = (await installedSources()).filter((s) => s.lang === "en" || s.lang === "all");
+  const sources = await usableSources();
   const variants = queryVariants(gaps.title);
   const out: GapSource[] = [];
   const queue = [...sources];

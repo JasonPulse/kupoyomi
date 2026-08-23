@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
-import { gql, installedSources } from "../suwayomi.js";
+import { gql } from "../suwayomi.js";
+import { usableSources } from "../paid.js";
 
 const SEARCH = `mutation($src:LongString!,$q:String!){
   fetchSourceManga(input:{source:$src,type:SEARCH,query:$q,page:1}){
@@ -22,7 +23,9 @@ export async function streamSearch(res: ServerResponse, query: string, concurren
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
-  const sources = (await installedSources()).filter((s) => s.lang === "en" || s.lang === "all");
+  // usableSources, not installedSources: a paid source cannot be downloaded from, so
+  // offering it as a search result is offering a dead end.
+  const sources = await usableSources();
   send("start", { sources: sources.length });
 
   const queue = [...sources];

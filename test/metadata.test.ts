@@ -214,3 +214,52 @@ test("adoption follows the disk, not Suwayomi's downloaded flag", { skip: !haveD
 
   await p.query("DELETE FROM legacy_manga WHERE suwayomi_id = $1", [MID]);
 });
+
+/**
+ * Paid subscription sources.
+ *
+ * Manta gave three free chapters and served a six-page purchase notice for the next 99,
+ * each recorded as a successful download. The lasting damage is not the bytes: the ledger
+ * then believes chapter 4 is held, so a real source's chapter 4 is skipped as already
+ * present. A paid source is worse than no source, so it must not be reachable.
+ */
+test("paid sources are recognised and an empty list matches nothing", { skip: !haveDb }, async () => {
+  const { isPaidSource, forgetPaid, paidPattern } = await import("../src/paid.js");
+  forgetPaid();
+
+  for (const name of ["Manta (EN)", "manta", "Comikey", "Coolmic", "Mangamo",
+                      "Toomics (EN)", "Lezhin (EN)", "Pocket Comics", "PocketComics",
+                      "Manga Planet", "MangaPlanet"]) {
+    assert.equal(await isPaidSource(name), true, `${name} must be recognised as paid`);
+  }
+  for (const name of ["MangaDex (EN)", "LikeManga (EN)", "Weeb Central (EN)",
+                      "ManhuaTop (EN)", "MangaFox (EN)", "Atsumaru (EN)"]) {
+    assert.equal(await isPaidSource(name), false, `${name} is free and must stay usable`);
+  }
+
+  // An empty list must not compile to a regex that matches every source, which would
+  // silently hide the entire library from search.
+  const p = db();
+  await p.query("BEGIN");
+  await p.query("DELETE FROM paid_source");
+  forgetPaid();
+  assert.equal(await isPaidSource("Manta (EN)"), false, "no rows means nothing is paid");
+  assert.equal((await paidPattern()).test("literally anything"), false,
+    "an empty list must never match everything");
+  await p.query("ROLLBACK");
+  forgetPaid();
+  assert.equal(await isPaidSource("Manta (EN)"), true, "and the list is back after rollback");
+});
+
+test("adding a series from a paid source is refused", { skip: !haveDb }, async () => {
+  const { addSeries } = await import("../src/ui/search.js");
+  const { forgetPaid } = await import("../src/paid.js");
+  forgetPaid();
+  await assert.rejects(
+    () => addSeries({ title: "Paid Test Series", sourceId: "1", sourceName: "Manta (EN)", url: "/x" }),
+    /paid subscription/,
+    "the last gate refuses it even if a stale page posts the form");
+  const left = (await db().query<{ n: string }>(
+    "SELECT count(*) n FROM series WHERE title = $1", ["Paid Test Series"])).rows[0];
+  assert.equal(Number(left?.n), 0, "and no series row is left behind");
+});

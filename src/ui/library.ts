@@ -3,7 +3,7 @@ import { esc, page, news } from "./layout.js";
 import { fmt, ago } from "../held.js";
 
 type Row = {
-  id: number; title: string; status: string; muted: boolean;
+  id: number; title: string; status: string; muted: boolean; unbound: boolean;
   held: number; lo: string | null; hi: string | null;
   wanted: number; failed: number; source: string | null;
   last_upload: string | null; stalled_since: string | null; cover_path: string | null;
@@ -32,6 +32,8 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
   const today = (await p.query<{ d: string }>("SELECT current_date::text AS d")).rows[0]?.d ?? "";
   const rows = (await p.query<Row>(
     `SELECT s.id, s.title, s.status, s.muted, s.cover_path,
+            NOT EXISTS (SELECT 1 FROM series_binding b
+                         WHERE b.series_id = s.id AND b.role = 'primary') AS unbound,
             count(c.chapter_number)::int AS held,
             min(c.chapter_number) AS lo, max(c.chapter_number) AS hi,
             max(c.uploaded_at)::date::text AS last_upload,
@@ -51,6 +53,9 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
     chapters: rows.reduce((a, r) => a + r.held, 0),
     wanted: rows.reduce((a, r) => a + r.wanted, 0),
     stalled: rows.filter((r) => r.stalled_since && !r.muted).length,
+    // Archived series have no binding on purpose and are muted. An unmuted series with
+    // no binding is stranded: nothing will ever scan it, and nothing said so.
+    stranded: rows.filter((r) => r.unbound && !r.muted).length,
     sourceless: rows.filter((r) => !r.source).length,
   };
   const pct = (r: Row): number => (r.held + r.wanted > 0 ? Math.round((r.held / (r.held + r.wanted)) * 100) : 100);
@@ -61,6 +66,7 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
       ${r.cover_path ? `<img loading="lazy" src="/series/${r.id}/cover" alt="">`
                      : `<div class="noimg">no cover</div>`}
       ${r.wanted > 0 ? `<span class="flag">+${r.wanted}</span>`
+        : r.unbound && !r.muted ? `<span class="flag bad">no source</span>`
         : r.stalled_since && !r.muted ? `<span class="flag">quiet</span>` : ""}
       <div class="pb"><i style="width:${pct(r)}%"></i></div>
       <div class="t">${esc(r.title)}</div>
@@ -83,7 +89,9 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
   const link = (v: string, label: string): string =>
     `<a class="${view === v ? "on" : ""}" href="/?view=${v}${q ? `&q=${encodeURIComponent(q)}` : ""}">${label}</a>`;
 
-  return page("library", `${totals.series} series &middot; ${totals.chapters} chapters &middot; ${totals.wanted} queued`,
+  // Not a fifth tile: the row is four wide and a fifth wraps into a hole.
+  return page("library", `${totals.series} series &middot; ${totals.chapters} chapters &middot; ${totals.wanted} queued${
+    totals.stranded > 0 ? ` &middot; <span class="bad">${totals.stranded} with no source</span>` : ""}`,
     `<style>${EXTRA}</style>
      <div class="grid" style="margin-bottom:14px">
        <div class="tile"><div class="n">series</div><b style="font-size:20px">${totals.series}</b></div>

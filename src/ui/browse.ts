@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
-import { gql, installedSources } from "../suwayomi.js";
+import { gql } from "../suwayomi.js";
+import { usableSources } from "../paid.js";
 import { esc, page } from "./layout.js";
 
 const FILTERS = `query($id:LongString!){ source(id:$id){
@@ -47,7 +48,7 @@ export function parseFilterParams(values: string[]): unknown[] {
 }
 
 export async function browseIndex(): Promise<string> {
-  const sources = (await installedSources()).filter((s) => s.lang === "en" || s.lang === "all");
+  const sources = await usableSources();
   // supportsLatest false has tracked exactly with an empty popular listing on this
   // library, so it is worth warning about rather than letting the page come up blank.
   const rows = [...sources].sort((a, b) => Number(b.supportsLatest) - Number(a.supportsLatest)

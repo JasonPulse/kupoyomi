@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { isPaidSource } from "../paid.js";
 import { gql, installedSources } from "../suwayomi.js";
 import { queryVariants } from "../match.js";
 import { canonical } from "../seed.js";
@@ -95,6 +96,13 @@ export async function searchPage(query?: string): Promise<string> {
 
 /** Creates the series and its primary binding, then queues whatever the source has. */
 export async function addSeries(v: { title: string; sourceId: string; sourceName: string; url: string }): Promise<number> {
+  // The last gate. A paid source is filtered out of search and browse, but a stale page
+  // or a hand-built request could still post one, and binding to it is the mistake worth
+  // preventing: its chapters download as a purchase notice and the ledger then treats
+  // them as held, so a real source's chapters are skipped as already present.
+  if (await isPaidSource(v.sourceName)) {
+    throw new Error(`${v.sourceName} is a paid subscription service and cannot be downloaded from`);
+  }
   const p = db();
   const client = await p.connect();
   try {

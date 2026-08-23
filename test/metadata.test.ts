@@ -478,3 +478,31 @@ test("a linked folder holding nothing new is reported as redundant, and only the
   assert.ok(existsSync(join(legacy, "Chapter 1.cbz")), "nothing was deleted by reporting");
   await p.query("DELETE FROM series WHERE id = $1", [sid]);
 });
+
+test("space freed counts only files the library does not already own", { skip: !haveDb }, async () => {
+  const { setLink, adoptFromDisk, redundantFolders } = await import("../src/adopt.js");
+  const { mkdirSync: mk, writeFileSync: wf } = await import("node:fs");
+  const p = db();
+  const TITLE = "Hardlink Accounting Series";
+  await p.query("DELETE FROM series WHERE title = $1", [TITLE]);
+  const s = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [TITLE]);
+  const sid = s.rows[0]!.id;
+
+  const legacy = join(legacyRoot, "Hardlink_Accounting_Series");
+  mk(legacy, { recursive: true });
+  const body = Buffer.alloc(4096, 7);
+  for (const n of [1, 2]) wf(join(legacy, `Chapter ${n}.cbz`), body);
+  await setLink(sid, legacy, "linked");
+  await adoptFromDisk(sid);          // hardlinks both into the library
+
+  const f = (await redundantFolders()).find((x) => x.path === legacy)!;
+  assert.equal(f.heldAll, true);
+  assert.equal(f.files, 2);
+  assert.ok(f.bytes >= 8192, "the folder really is that big on disk");
+  assert.equal(f.linkedCopies, 2, "both files are hardlinks the library already holds");
+  assert.equal(f.reclaimable, 0,
+    "so deleting the folder frees nothing, and reporting its size as freed space is a lie");
+
+  await p.query("DELETE FROM series WHERE id = $1", [sid]);
+});

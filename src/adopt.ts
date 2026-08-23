@@ -277,17 +277,25 @@ export async function unclaimedFolders(): Promise<Array<{ path: string; folder: 
  * is held: a single chapter the ledger lacks keeps the whole folder.
  */
 export async function redundantFolders(): Promise<Array<{
-  seriesId: number; title: string; path: string; files: number; bytes: number; heldAll: boolean;
+  seriesId: number; title: string; path: string; files: number;
+  /** Total size of the folder. */
+  bytes: number;
+  /** What deleting it would actually reclaim. An adopted chapter is a hardlink, so the
+   *  library holds the same inode and removing this name frees nothing at all. */
+  reclaimable: number;
+  linkedCopies: number;
+  heldAll: boolean;
 }>> {
   const p = db();
   const links = (await p.query<{ series_id: number; path: string; title: string }>(
     `SELECT l.series_id, l.path, s.title FROM legacy_link l JOIN series s ON s.id = l.series_id
       WHERE l.state = 'linked' ORDER BY s.title`)).rows;
-  const out: Array<{ seriesId: number; title: string; path: string; files: number; bytes: number; heldAll: boolean }> = [];
+  const out: Array<{ seriesId: number; title: string; path: string; files: number;
+    bytes: number; reclaimable: number; linkedCopies: number; heldAll: boolean }> = [];
   for (const l of links) {
     const held = new Set((await p.query<{ n: string }>(
       "SELECT chapter_number AS n FROM chapter WHERE series_id = $1", [l.series_id])).rows.map((r) => Number(r.n)));
-    let files = 0, bytes = 0, missing = 0;
+    let files = 0, bytes = 0, reclaimable = 0, linkedCopies = 0, missing = 0;
     let names: string[];
     try { names = readdirSync(l.path); } catch { continue; }
     for (const f of names) {
@@ -296,9 +304,16 @@ export async function redundantFolders(): Promise<Array<{
       const n = parseChapterNumber(f);
       // A file whose number cannot be read is not proven redundant, so it protects the folder.
       if (n === null || !held.has(n)) { missing++; continue; }
-      try { bytes += statSync(`${l.path}/${f}`).size; } catch { /* counted as zero */ }
+      try {
+        const st = statSync(`${l.path}/${f}`);
+        bytes += st.size;
+        // nlink above one means the library holds this same inode, so deleting this name
+        // frees nothing. Summing sizes regardless reported 2.1GB for two folders where
+        // most of it was the library's own files counted a second time.
+        if (st.nlink > 1) linkedCopies++; else reclaimable += st.size;
+      } catch { /* counted as zero */ }
     }
-    if (files > 0) out.push({ seriesId: l.series_id, title: l.title, path: l.path, files, bytes, heldAll: missing === 0 });
+    if (files > 0) out.push({ seriesId: l.series_id, title: l.title, path: l.path, files, bytes, reclaimable, linkedCopies, heldAll: missing === 0 });
   }
   return out;
 }
@@ -315,8 +330,11 @@ export async function pruneRedundant(opts: { delete?: boolean } = {}): Promise<v
   let freed = 0;
   for (const f of done) {
     console.log(`  ${opts.delete ? "deleting" : "redundant"} ${f.path}`);
-    console.log(`           ${f.files} files, ${(f.bytes / 1048576).toFixed(0)}MB, every chapter held for "${f.title.slice(0, 40)}"`);
-    freed += f.bytes;
+    console.log(`           ${f.files} files for "${f.title.slice(0, 40)}", every chapter held`);
+    console.log(`           ${(f.bytes / 1048576).toFixed(0)}MB on disk, of which ${
+      (f.reclaimable / 1048576).toFixed(0)}MB is actually reclaimable`
+      + (f.linkedCopies > 0 ? ` (${f.linkedCopies} files are hardlinks the library already owns)` : ""));
+    freed += f.reclaimable;
     if (!opts.delete) continue;
     try {
       rmSync(f.path, { recursive: true });
@@ -328,4 +346,5 @@ export async function pruneRedundant(opts: { delete?: boolean } = {}): Promise<v
     }
   }
   console.log(`${opts.delete ? "freed" : "would free"} ${(freed / 1048576).toFixed(0)}MB across ${done.length} folders`);
+  if (!opts.delete) console.log("pass --delete to remove them");
 }

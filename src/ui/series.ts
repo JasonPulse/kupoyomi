@@ -79,7 +79,16 @@ export async function seriesPage(id: number): Promise<string> {
     `${chapters.length} held &middot; ${wanted.length} queued &middot; ${gaps.length} gaps`,
     `<style>.hero{display:flex;gap:18px;align-items:flex-start}
        .hero img{width:210px;height:300px;object-fit:cover;border-radius:5px;background:#242424;flex:0 0 auto}
-       .hero .syn{color:#4a4034;font-size:13px;margin-top:9px;white-space:pre-wrap}</style>
+       .hero .syn{color:#4a4034;font-size:13px;margin-top:9px;white-space:pre-wrap}
+       /* Phone: the cover floats so the synopsis flows around and then under it. A flex
+          row cannot wrap text under a sibling, so a 210px cover left the synopsis about
+          four words wide. */
+       @media(max-width:700px){
+         .hero{display:block}
+         .hero::after{content:"";display:table;clear:both}
+         .hero img{float:left;width:112px;height:160px;margin:0 12px 6px 0}
+         .hero .syn{font-size:12.5px;white-space:pre-wrap;overflow-wrap:anywhere}
+       }</style>
      <div class="card">
        <div class="hero">
        ${s.cover_path ? `<img src="/series/${id}/cover" alt="">` : `<img alt="">`}

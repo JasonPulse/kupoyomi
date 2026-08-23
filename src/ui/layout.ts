@@ -81,7 +81,6 @@ a.series{color:#4a3a7a;text-decoration:none}a.series:hover{text-decoration:under
   th{white-space:normal}
   td{word-break:break-word}
   .grid{gap:8px}
-  .hero img{width:120px;height:170px}
 }
 
 /* Cover art stays dark inside the parchment, so it reads as art laid on paper. */

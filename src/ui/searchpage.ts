@@ -237,6 +237,16 @@ const EXTRA_CSS = `
 .srch-head{display:flex;gap:16px;margin-bottom:12px;align-items:flex-start}
 .cover{width:190px;height:272px;object-fit:cover;border-radius:4px;background:#242424;flex:0 0 auto}
 .srch-body{min-width:0}
+/* On a phone the cover floats and the text flows around and under it. A flex row cannot
+   do that: the synopsis is stuck in a column beside a fixed-width cover, which on a
+   390px screen left about four words per line and a page of scrolling. */
+@media(max-width:700px){
+  .srch-head{display:block;margin-bottom:9px}
+  .srch-head::after{content:"";display:table;clear:both}
+  .cover{float:left;width:104px;height:150px;margin:0 11px 6px 0}
+  .srch-body{min-width:0;overflow:visible}
+  .desc,.descfull{font-size:12.5px;-webkit-line-clamp:14}
+}
 .desc{color:#4a4034;font-size:12.5px;margin-top:7px;display:-webkit-box;-webkit-line-clamp:10;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;list-style:none}
 .desc::-webkit-details-marker{display:none}
 .dwrap[open] .desc{display:none}

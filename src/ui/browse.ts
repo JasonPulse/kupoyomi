@@ -70,8 +70,14 @@ const EXTRA = `
 .grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:14px}
 .bt{border-radius:6px;overflow:hidden}
 .bt img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#222}
-.bt .n{padding:8px 9px;font-size:13px;line-height:1.35;height:58px;overflow:hidden}
-.bt .f{padding:0 8px 8px;display:flex;justify-content:space-between;align-items:center;font-size:11px}
+.bt{display:flex;flex-direction:column}
+.bt .n{padding:8px 9px 3px;font-size:13px;line-height:1.35;max-height:56px;overflow:hidden;font-weight:600}
+.bt .syn{padding:0 9px;font-size:11.5px;line-height:1.4;color:#c6c6cf;
+  display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}
+.bt .syn.none{color:#7a7a85;font-style:italic}
+.bt .when{padding:4px 9px 0;font-size:11px}
+.bt .f{padding:6px 8px 8px;display:flex;justify-content:space-between;align-items:center;
+  font-size:11px;gap:6px;margin-top:auto}
 .chips{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}
 .chip{font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.25);color:#4a4034;text-decoration:none}
 .chip.on{background:#5d8a4a;color:#f2f6ee;border-color:#476b38;font-weight:700}
@@ -89,6 +95,21 @@ function detail(id, card) {
       const [i, c] = q.shift(); active++;
       fetch('/api/detail?mangaId='+i).then(r=>r.json()).then(d=>{
         const n = c.querySelector('.ch');
+        // The detail call already carried a synopsis, a status and an upload date. Only
+        // the chapter count was ever shown, so a browse tile said far less than a search
+        // card about the same title.
+        const syn = c.querySelector('.syn');
+        if (syn) {
+          if (d.description) { syn.textContent = d.description; syn.className = 'syn'; }
+          else { syn.textContent = 'no synopsis from this source'; syn.className = 'syn none'; }
+        }
+        const w = c.querySelector('.when');
+        if (w) {
+          const bits = [];
+          if (d.status && d.status !== 'UNKNOWN') bits.push(d.status.toLowerCase());
+          if (d.lastUpload) bits.push(d.lastUpload);
+          w.textContent = bits.join(' \u00b7 ');
+        }
         if (d.chapters === null || d.chapters === undefined) { n.textContent = '?'; return; }
         n.textContent = d.chapters + ' ch';
         n.className = 'ch ' + (d.chapters === 0 ? 'bad' : d.chapters < 3 ? 'warn' : 'rec');
@@ -132,6 +153,8 @@ es.addEventListener('hit', e => {
   d.className = 'bt';
   d.innerHTML = (h.thumb ? '<img loading="lazy" src="'+h.thumb+'">' : '<img>') +
     '<div class="n">'+h.title.replace(/</g,'&lt;')+'</div>' +
+    '<div class="syn none">loading</div>' +
+    '<div class="when dim"></div>' +
     '<div class="f"><span class="ch dim">checking</span>' +
     '<form class="addf" method="post" action="/add"><input type="hidden" name="title" value="'+h.title.replace(/"/g,'&quot;')+'">' +
     '<input type="hidden" name="sourceId" value="'+h.sourceId+'">' +

@@ -17,6 +17,9 @@ export const ASSETS: Record<string, { body: Buffer; type: string } | undefined> 
     ["/icon-192.png", "icon-192.png", "image/png"],
     ["/icon-512.png", "icon-512.png", "image/png"],
     ["/apple-touch-icon.png", "apple-touch-icon.png", "image/png"],
+    // One nine-slice frame, built from the three originals. They stay served because
+    // newsframe.png is derived from them and nothing else regenerates it.
+    ["/newsframe.png", "newsframe.png", "image/png"],
     ["/newstop.png", "newstop.png", "image/png"],
     ["/newsmiddle.png", "newsmiddle.png", "image/png"],
     ["/newsbottom.png", "newsbottom.png", "image/png"],

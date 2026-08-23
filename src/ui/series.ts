@@ -25,10 +25,14 @@ export async function seriesPage(id: number): Promise<string> {
   // type from a separate repository, so a source cannot be one.
   // Folders on disk that belong to this series, plus name-match guesses to confirm.
   // Chapters in an unlinked folder are invisible to the library and get downloaded again.
-  const { findOnDisk } = await import("../adopt.js");
+  const { findOnDisk, unclaimedFolders } = await import("../adopt.js");
   const disk = await findOnDisk(id, { propose: true }).catch(() => ({ sources: [] as Array<{
     path: string; folder: string; linked: boolean; alreadyHeld: number; offers: Map<number, string>;
   }> }));
+  // Everything unclaimed, because a name match cannot find a folder called
+  // Sousou_no_Frieren for a series called Frieren: Beyond Journey's End.
+  const unclaimed = (await unclaimedFolders().catch(() => []))
+    .filter((u) => !disk.sources.some((d) => d.path === u.path));
   const readRows = (await p.query<{ chapter_number: string; completed: boolean }>(
     "SELECT chapter_number, completed FROM read_progress WHERE series_id = $1", [id])).rows;
   const readSet = new Set(readRows.filter((r) => r.completed).map((r) => fmt(r.chapter_number)));
@@ -123,7 +127,7 @@ export async function seriesPage(id: number): Promise<string> {
              : ""}</span>
        </div>
      </div>
-     ${disk.sources.length === 0 ? "" : `<div class="card"><div class="title">Files on disk</div>
+     ${disk.sources.length === 0 && unclaimed.length === 0 ? "" : `<div class="card"><div class="title">Files on disk</div>
        <div class="meta">The library tree is the source of truth, and these are the old folders a
          chapter can be taken from without downloading it. Nothing here is deleted or moved: adopting
          hardlinks the file, so it costs no space and the old folder stays exactly as it is.</div>
@@ -147,6 +151,17 @@ export async function seriesPage(id: number): Promise<string> {
                + `<form method="post" action="/series/${id}/link"><input type="hidden" name="path" value="${esc(d.path)}">
                   <input type="hidden" name="state" value="ignored"><button class="weak" type="submit">not this</button></form>`}
          </td></tr>`).join("")}</table>
+       ${unclaimed.length === 0 ? "" : `<form method="post" action="/series/${id}/link" class="actions">
+         <input type="hidden" name="state" value="linked">
+         <span class="hint" style="margin:0 8px 0 0">or point a folder here by hand</span>
+         <select name="path" style="max-width:60%">
+           ${unclaimed.map((u) => `<option value="${esc(u.path)}">${esc(u.folder.slice(0, 58))} (${u.files} files)</option>`).join("")}
+         </select>
+         <button class="weak" type="submit">link it</button>
+         <span class="hint">A romanised folder name never matches its English title, so these
+           have to be chosen. ${unclaimed.length} folder${unclaimed.length === 1 ? "" : "s"} still
+           unclaimed across the whole library.</span>
+       </form>`}
      </div>`}
      <div class="card"><div class="title">Updates</div>
        <div class="actions" style="margin:0">

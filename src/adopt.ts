@@ -201,3 +201,24 @@ export async function diskReport(): Promise<void> {
     console.log(`ignore one with: kupo link <seriesId> '<path>' --ignore`);
   }
 }
+
+/**
+ * Folders holding archives that no series has claimed.
+ *
+ * Needed because a name match cannot find them all: "Sousou_no_Frieren" is "Frieren:
+ * Beyond Journey's End" and "Kusuriya_no_Hitorigoto" is "The Apothecary Diaries". Neither
+ * shares a letter with its English title, so neither will ever be proposed and both have
+ * to be pointed at a series by hand.
+ */
+export async function unclaimedFolders(): Promise<Array<{ path: string; folder: string; files: number }>> {
+  const claimed = new Set((await db().query<{ path: string }>(
+    "SELECT path FROM legacy_link WHERE state = 'linked'")).rows.map((r) => r.path));
+  return (await scanLegacyTree())
+    .filter((d) => d.cbzCount > 0)
+    .map((d) => ({
+      path: d.sourceDir ? `${config.legacyRoot}/${d.sourceDir}/${d.folder}` : `${config.legacyRoot}/${d.folder}`,
+      folder: d.folder, files: d.cbzCount,
+    }))
+    .filter((d) => !claimed.has(d.path))
+    .sort((a, b) => b.files - a.files);
+}

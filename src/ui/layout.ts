@@ -53,6 +53,8 @@ button:hover{filter:brightness(1.08)}
 button[disabled]{opacity:.45;cursor:default}
 input[type=search],input[type=text]{background:#fdfaf1;border:1px solid #a99d84;color:#2b2318;
   padding:6px 10px;border-radius:4px;font-size:13px;min-width:320px;max-width:100%}
+select{background:#fdfaf1;border:1px solid #a99d84;color:#2b2318;padding:5px 8px;
+  border-radius:4px;font-size:12.5px;max-width:100%}
 a.series{color:#4a3a7a;text-decoration:none}a.series:hover{text-decoration:underline}
 .bar{height:5px;background:rgba(0,0,0,.16);border-radius:3px;overflow:hidden;min-width:70px}
 .bar > i{display:block;height:100%;background:#6b4fa0}

@@ -25,15 +25,20 @@ export async function findGaps(seriesId: number): Promise<GapReport> {
     "SELECT chapter_number AS n FROM wanted WHERE series_id = $1 AND state <> 'done'", [seriesId])).rows
     .map((r) => Number(r.n)));
 
-  // Only whole numbers, deliberately. A source's decimals are its own invention -- one
-  // site splits chapter 12 into 12.1 and 12.2 where another does not -- so treating a
-  // missing 12.2 as a hole would invent gaps that nobody is missing. This does mean the
-  // count covers whole chapters only, which is the honest scope rather than a bug.
+  // Only whole numbers are reported missing, deliberately. A source's decimals are its
+  // own invention -- one site splits chapter 12 into 12.1 and 12.2 where another does
+  // not -- so treating a missing 12.2 as a hole would invent gaps nobody is missing.
+  //
+  // The ceiling, though, comes from every chapter held and not just the whole ones. A
+  // series holding 1-8 and then 12.3 used to report no gaps at all, because the highest
+  // whole chapter was 8 and the range stopped there. Holding 12.3 is proof that 9
+  // through 12 exist and are missing, which is precisely the case worth flagging.
   const whole = [...new Set(held.filter(Number.isInteger))].sort((a, b) => a - b);
   const have = new Set(whole);
+  const ceiling = held.length > 0 ? Math.floor(Math.max(...held)) : 0;
   const missing: number[] = [];
-  if (whole.length >= 2) {
-    for (let i = whole[0]!; i <= whole[whole.length - 1]!; i++) if (!have.has(i)) missing.push(i);
+  if (whole.length >= 1) {
+    for (let i = whole[0]!; i <= ceiling; i++) if (!have.has(i)) missing.push(i);
   }
   return {
     seriesId, title: s.title, missing,

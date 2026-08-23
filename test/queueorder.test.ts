@@ -101,3 +101,51 @@ test("a tick stays inside one series' block rather than hopping sources", { skip
     "within one block the batch stays on one series, so the downloader is not hopping sources");
   assert.equal(rows[0]?.title, "Aardvark Saga");
 });
+
+/**
+ * The gap range's ceiling.
+ *
+ * A series holding 1-8 and then 12.3 reported no gaps at all: the highest WHOLE chapter
+ * was 8, so the range stopped there and 9 through 12 were invisible. Holding 12.3 is
+ * proof those exist, and a run of missing chapters reaching your top chapter is a source
+ * that stopped partway, which is the one case worth flagging.
+ */
+const { findGaps } = await import("../src/gaps.js");
+const GAPSERIES = "Gap Ceiling Series";
+let gapId = 0;
+
+test("a decimal top chapter does not truncate the gap range", { skip: !haveDb }, async () => {
+  const p = db();
+  await p.query("DELETE FROM series WHERE title = $1", [GAPSERIES]);
+  const s = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [GAPSERIES]);
+  gapId = s.rows[0]!.id;
+  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 12.3]) {
+    await p.query("INSERT INTO chapter (series_id, chapter_number, file_path) VALUES ($1,$2,$3)",
+      [gapId, n, `/nowhere/${n}.cbz`]);
+  }
+
+  const g = await findGaps(gapId);
+  assert.deepEqual(g.missing, [9, 10, 11, 12],
+    "9 through 12 are missing; holding 12.3 is what proves they exist");
+  assert.deepEqual(g.unsupplied, [9, 10, 11, 12], "none of them are queued");
+
+  await p.query("DELETE FROM series WHERE id = $1", [gapId]);
+});
+
+test("a decimal inside the range is still not treated as a gap", { skip: !haveDb }, async () => {
+  const p = db();
+  await p.query("DELETE FROM series WHERE title = $1", [GAPSERIES]);
+  const s = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [GAPSERIES]);
+  const id = s.rows[0]!.id;
+  // 12.1 and 12.2 are one site's split of chapter 12. A missing 12.2 is not a hole.
+  for (const n of [1, 2, 3, 12, 12.1]) {
+    await p.query("INSERT INTO chapter (series_id, chapter_number, file_path) VALUES ($1,$2,$3)",
+      [id, n, `/nowhere/${n}.cbz`]);
+  }
+  const g = await findGaps(id);
+  assert.deepEqual(g.missing, [4, 5, 6, 7, 8, 9, 10, 11],
+    "whole chapters only, and 12.2 is not invented as missing");
+  await p.query("DELETE FROM series WHERE id = $1", [id]);
+});

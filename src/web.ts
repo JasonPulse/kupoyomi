@@ -175,7 +175,9 @@ export async function handleArchivePost(body: string): Promise<string> {
   const id = Number(new URLSearchParams(body).get("id"));
   if (!Number.isInteger(id)) throw new Error("bad form");
   await archiveCandidate(id);
-  return "/";
+  // Back to the list, not the library. Working through a queue of twelve means twelve
+  // trips back here, and every one of them was a manual navigation.
+  return "/review";
 }
 
 export async function handleConfirmPost(body: string): Promise<string> {
@@ -184,5 +186,5 @@ export async function handleConfirmPost(body: string): Promise<string> {
   const pick = Number(params.get("pick"));
   if (!Number.isInteger(id) || !Number.isInteger(pick)) throw new Error("bad form");
   await confirmCandidate(id, pick);
-  return "/";
+  return "/review";
 }

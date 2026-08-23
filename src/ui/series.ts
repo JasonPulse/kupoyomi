@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { esc, page } from "./layout.js";
 import { fmt, ago } from "../held.js";
+import { findGaps } from "../gaps.js";
 
 export async function seriesPage(id: number): Promise<string> {
   const p = db();
@@ -29,11 +30,9 @@ export async function seriesPage(id: number): Promise<string> {
     .reduce<number | null>((m, r) => Math.max(m ?? -Infinity, Number(r.chapter_number)) , null);
 
   const held = chapters.map((c) => Number(c.chapter_number));
-  const whole = new Set(held.filter(Number.isInteger));
-  const gaps: number[] = [];
-  if (whole.size > 0) {
-    for (let i = Math.min(...whole); i <= Math.max(...whole); i++) if (!whole.has(i)) gaps.push(i);
-  }
+  // findGaps owns this. The page used to compute it again, so the two could disagree and
+  // did: only one of them knew a decimal top chapter should raise the ceiling.
+  const gaps = (await findGaps(id)).missing;
 
   // Availability is fetched per binding from the page, since each answer is a live
   // request to a site and four sources should not make the page wait for four.
@@ -88,8 +87,11 @@ export async function seriesPage(id: number): Promise<string> {
              <th title="chapters past what you hold">new</th>
              <th title="chapters you hold that this source does not carry -- you keep the files">not carried</th><th></th></tr>
          ${bindRows || '<tr><td colspan="6" class="bad">no source bound</td></tr>'}</table>
-       <div class="actions"><a class="series" href="/search?q=${encodeURIComponent(s.title)}">find another source for this series</a>
-         <span class="hint">adding one from search attaches it here instead of creating a second series</span></div>
+       <div class="actions"><a class="series" href="/search?q=${encodeURIComponent(s.title)}">migrate: find another source</a>
+         <span class="hint">adding from search attaches the source to this series rather than making a
+           second one. It arrives as supplemental, and its real chapter count and range show up in the
+           table above so you can judge it before switching. Making it primary re-scans, and because
+           the ledger is keyed on chapter number, nothing already on disk is downloaded twice.</span></div>
        <div class="actions">
          <form method="post" action="/series/${id}/scan"><button class="weak" type="submit">check for new chapters</button></form>
          <form method="post" action="/series/${id}/metadata"><button class="weak" type="submit">refresh cover &amp; synopsis</button></form>
@@ -98,7 +100,14 @@ export async function seriesPage(id: number): Promise<string> {
            <button class="weak" type="submit">mark all read</button></form>
          <a class="series" href="/series/${id}/remove" style="margin-left:auto;color:#9b3226">remove from library</a>
          ${gaps.length > 0 ? `<a class="series" href="/series/${id}/gaps">fill ${gaps.length} gaps</a>` : ""}
-         <span class="hint">${gaps.length > 0 ? `missing inside your range: ${gaps.slice(0, 18).join(", ")}${gaps.length > 18 ? " ..." : ""}` : "no gaps"}</span>
+         <span class="hint">${gaps.length > 0
+           ? `missing inside your range: ${gaps.slice(0, 18).join(", ")}${gaps.length > 18 ? " ..." : ""}`
+           : "no gaps"}${
+           // A run of consecutive missing chapters at the top means the source stopped
+           // carrying it partway, which is a migration, not a gap fill.
+           gaps.length >= 3 && gaps[gaps.length - 1] === Math.floor(Math.max(...held, 0))
+             ? ". The run reaches your highest chapter, so this source stopped partway: migrating is the fix, not gap filling."
+             : ""}</span>
        </div>
      </div>
      <div class="card"><div class="title">Updates</div>

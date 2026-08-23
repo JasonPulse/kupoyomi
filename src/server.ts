@@ -385,6 +385,11 @@ export async function serve(): Promise<void> {
           // Exactly one primary is a database constraint, so the incumbent steps down first.
           await db().query("UPDATE series_binding SET role='supplemental' WHERE series_id=$1 AND role='primary'", [sid]);
           await db().query("UPDATE series_binding SET role='primary' WHERE id=$1 AND series_id=$2", [bid, sid]);
+          // A promotion with no scan behind it changes a row and nothing else: the whole
+          // point of switching source is what the new one carries, and until something
+          // scans, the queue still reflects the old one. Not awaited, so the page comes
+          // straight back rather than sitting on a live search.
+          void scanWanted({ seriesId: sid }).catch(() => undefined);
           return `/series/${sid}`;
         }
         const meta = /^\/series\/(\d+)\/metadata$/.exec(path);

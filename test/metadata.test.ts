@@ -401,3 +401,80 @@ test("a folder linked to one series is not offered to another", { skip: !haveDb 
 
   for (const id of ids) await p.query("DELETE FROM series WHERE id = $1", [id]);
 });
+
+/**
+ * Other names a series goes by.
+ *
+ * Half the folders on disk are romanised Japanese and share no letters with their English
+ * titles: Kusuriya_no_Hitorigoto is The Apothecary Diaries. No similarity measure will
+ * ever connect those, so the fact has to be stated once and remembered.
+ */
+test("an alias makes a folder match a title it shares no letters with", { skip: !haveDb }, async () => {
+  const { addAlias, findOnDisk, adoptFromDisk, setLink, aliasesFor } = await import("../src/adopt.js");
+  const { mkdirSync: mk, writeFileSync: wf } = await import("node:fs");
+  const p = db();
+  const TITLE = "The Apothecary Chronicles Test";
+  await p.query("DELETE FROM series WHERE title = $1", [TITLE]);
+  const s = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [TITLE]);
+  const sid = s.rows[0]!.id;
+
+  const legacy = join(legacyRoot, "Kusuriya_no_Hitorigoto_Test");
+  mk(legacy, { recursive: true });
+  for (const n of [1, 2]) wf(join(legacy, `Chapter ${n}.cbz`), Buffer.from(`ch${n}`));
+
+  // Nothing connects the two names, so nothing is proposed.
+  assert.equal((await findOnDisk(sid, { propose: true })).sources.length, 0,
+    "a romanised folder cannot be matched by similarity, which is the whole problem");
+
+  await addAlias(sid, "Kusuriya no Hitorigoto Test");
+  const after = await findOnDisk(sid, { propose: true });
+  assert.equal(after.sources.length, 1, "with the name stated, the folder is found");
+  assert.equal(after.sources[0]?.linked, false, "and it is still only a proposal");
+
+  await setLink(sid, legacy, "linked");
+  assert.equal(await adoptFromDisk(sid), 2);
+
+  // Linking teaches the folder name as an alias, so a second folder named the same way
+  // is recognised without being told again.
+  const names = (await aliasesFor(sid)).map((a) => a.alias);
+  assert.ok(names.some((n) => /Kusuriya no Hitorigoto Test/i.test(n)),
+    `linking should record the folder name: got ${JSON.stringify(names)}`);
+
+  await p.query("DELETE FROM series WHERE id = $1", [sid]);
+});
+
+test("a linked folder holding nothing new is reported as redundant, and only then deleted", { skip: !haveDb }, async () => {
+  const { setLink, adoptFromDisk, redundantFolders } = await import("../src/adopt.js");
+  const { mkdirSync: mk, writeFileSync: wf } = await import("node:fs");
+  const p = db();
+  const TITLE = "Redundant Folder Series";
+  await p.query("DELETE FROM series WHERE title = $1", [TITLE]);
+  const s = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [TITLE]);
+  const sid = s.rows[0]!.id;
+
+  const legacy = join(legacyRoot, "Redundant_Folder_Series");
+  mk(legacy, { recursive: true });
+  for (const n of [1, 2, 3]) wf(join(legacy, `Chapter ${n}.cbz`), Buffer.from(`chapter ${n} bytes`));
+  await setLink(sid, legacy, "linked");
+
+  // Before adopting, the folder holds chapters the library lacks, so it is not redundant.
+  let report = (await redundantFolders()).filter((f) => f.path === legacy);
+  assert.equal(report[0]?.heldAll, false, "a folder holding something new must never be deletable");
+
+  await adoptFromDisk(sid);
+  report = (await redundantFolders()).filter((f) => f.path === legacy);
+  assert.equal(report[0]?.heldAll, true, "once every chapter is held it is a second copy");
+  assert.equal(report[0]?.files, 3);
+  assert.ok((report[0]?.bytes ?? 0) > 0, "and it reports the space it would free");
+
+  // A single unreadable filename protects the whole folder.
+  wf(join(legacy, "bonus material.cbz"), Buffer.from("x"));
+  report = (await redundantFolders()).filter((f) => f.path === legacy);
+  assert.equal(report[0]?.heldAll, false,
+    "a file whose chapter number cannot be read is not proven redundant");
+
+  assert.ok(existsSync(join(legacy, "Chapter 1.cbz")), "nothing was deleted by reporting");
+  await p.query("DELETE FROM series WHERE id = $1", [sid]);
+});

@@ -25,7 +25,8 @@ export async function seriesPage(id: number): Promise<string> {
   // type from a separate repository, so a source cannot be one.
   // Folders on disk that belong to this series, plus name-match guesses to confirm.
   // Chapters in an unlinked folder are invisible to the library and get downloaded again.
-  const { findOnDisk, unclaimedFolders } = await import("../adopt.js");
+  const { findOnDisk, unclaimedFolders, aliasesFor } = await import("../adopt.js");
+  const akas = await aliasesFor(id).catch(() => []);
   const disk = await findOnDisk(id, { propose: true }).catch(() => ({ sources: [] as Array<{
     path: string; folder: string; linked: boolean; alreadyHeld: number; offers: Map<number, string>;
   }> }));
@@ -160,6 +161,22 @@ export async function seriesPage(id: number): Promise<string> {
                + `<form method="post" action="/series/${id}/link"><input type="hidden" name="path" value="${esc(d.path)}">
                   <input type="hidden" name="state" value="ignored"><button class="weak" type="submit">not this</button></form>`}
          </td></tr>`).join("")}</table>
+       <div class="actions">
+         <span class="hint" style="margin:0 8px 0 0">also known as</span>
+         ${akas.length === 0 ? '<span class="dim" style="font-size:12px">nothing yet</span>' : akas.map((a) => `
+           <form method="post" action="/series/${id}/aka" style="display:inline">
+             <input type="hidden" name="name" value="${esc(a.alias)}">
+             <input type="hidden" name="remove" value="1">
+             <button class="weak" type="submit" title="${a.origin === "folder" ? "learned from a linked folder" : "typed in"}">${
+               esc(a.alias.slice(0, 40))} &times;</button></form>`).join(" ")}
+       </div>
+       <form method="post" action="/series/${id}/aka" class="actions">
+         <input type="text" name="name" placeholder="Kusuriya no Hitorigoto" style="min-width:0;width:240px">
+         <button class="weak" type="submit">add a name</button>
+         <span class="hint">A romanised folder name shares no letters with its English title, so
+           matching cannot find it. Naming it once here makes every folder called that match, and
+           linking a folder records its name here automatically.</span>
+       </form>
        ${unclaimed.length === 0 ? "" : `<form method="post" action="/series/${id}/link" class="actions">
          <input type="hidden" name="state" value="linked">
          <span class="hint" style="margin:0 8px 0 0">or point a folder here by hand</span>

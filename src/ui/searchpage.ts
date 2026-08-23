@@ -265,9 +265,14 @@ button[disabled]{opacity:.4;cursor:default}
 `;
 
 export async function searchPage(query?: string, seriesId?: number): Promise<string> {
-  const have = Object.fromEntries((await db().query<{ id: number; title: string }>(
-    "SELECT id, title FROM series")).rows.map((r) =>
-      [r.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(), r.id]));
+  // Titles and every other name a series goes by, so a source listing the romanised name
+  // is recognised as something already held rather than offered as a new series.
+  const have = Object.fromEntries([
+    ...(await db().query<{ id: number; name: string }>(
+      "SELECT id, title AS name FROM series")).rows,
+    ...(await db().query<{ id: number; name: string }>(
+      "SELECT series_id AS id, alias AS name FROM series_alias")).rows,
+  ].map((r) => [r.name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(), r.id]));
 
   // Choosing a source FOR a series, rather than searching for something new.
   //

@@ -409,6 +409,17 @@ export async function serve(): Promise<void> {
         }
         const meta = /^\/series\/(\d+)\/metadata$/.exec(path);
         if (meta) { await refreshMetadata(Number(meta[1])); return `/series/${meta[1]}`; }
+        const aka = /^\/series\/(\d+)\/aka$/.exec(path);
+        if (aka) {
+          const { addAlias, removeAlias } = await import("./adopt.js");
+          const name = (form.get("name") ?? "").trim();
+          if (name) {
+            if (form.get("remove")) await removeAlias(Number(aka[1]), name);
+            else await addAlias(Number(aka[1]), name).catch((e: unknown) =>
+              console.log(`alias rejected: ${e instanceof Error ? e.message : String(e)}`));
+          }
+          return `/series/${aka[1]}`;
+        }
         const link = /^\/series\/(\d+)\/link$/.exec(path);
         if (link) {
           const { setLink } = await import("./adopt.js");

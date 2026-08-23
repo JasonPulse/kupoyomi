@@ -1,4 +1,4 @@
-import { linkSync, mkdirSync, existsSync, statSync } from "node:fs";
+import { linkSync, mkdirSync, existsSync, statSync, readdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "./config.js";
 import { db } from "./db.js";
@@ -29,7 +29,26 @@ export type AdoptSource = {
   alreadyHeld: number;
 };
 
-const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+export const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+/** Records another name for a series. The normalised form is what matching compares. */
+export async function addAlias(seriesId: number, alias: string, origin = "manual"): Promise<void> {
+  const n = norm(alias);
+  if (n.length < 3) throw new Error("an alias needs at least three letters or digits");
+  await db().query(
+    `INSERT INTO series_alias (series_id, alias, norm, origin) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (series_id, norm) DO UPDATE SET alias = EXCLUDED.alias`,
+    [seriesId, alias.trim(), n, origin]);
+}
+
+export async function removeAlias(seriesId: number, alias: string): Promise<void> {
+  await db().query("DELETE FROM series_alias WHERE series_id = $1 AND norm = $2",
+    [seriesId, norm(alias)]);
+}
+
+export const aliasesFor = async (seriesId: number): Promise<Array<{ alias: string; origin: string }>> =>
+  (await db().query<{ alias: string; origin: string }>(
+    "SELECT alias, origin FROM series_alias WHERE series_id = $1 ORDER BY alias", [seriesId])).rows;
 
 /**
  * How much of `a` is present in `b`, as a fraction, comparing letters only. Folder names
@@ -38,12 +57,19 @@ const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
  * Enjoys...". A prefix test on the normalised forms is enough and cannot match by
  * accident at these lengths.
  */
-const looksLikeSame = (title: string, folder: string): boolean => {
-  const a = norm(title), b = norm(folder);
+const similar = (a: string, b: string): boolean => {
   if (a.length < 8 || b.length < 8) return a === b;
   const shorter = a.length <= b.length ? a : b;
   const longer = a.length <= b.length ? b : a;
   return longer.startsWith(shorter.slice(0, Math.max(12, Math.floor(shorter.length * 0.8))));
+};
+
+/** Matches a folder against a series title and every other name it goes by. */
+const looksLikeSame = (title: string, folder: string, aliases: string[] = []): boolean => {
+  const b = norm(folder);
+  // An alias is a stated fact, so an exact normalised match on one is a match, full stop.
+  if (aliases.includes(b)) return true;
+  return similar(norm(title), b) || aliases.some((a) => similar(a, b));
 };
 
 /**
@@ -65,6 +91,8 @@ export async function findOnDisk(seriesId: number, opts: { propose?: boolean } =
     "SELECT chapter_number AS n FROM chapter WHERE series_id = $1", [seriesId])).rows.map((r) => Number(r.n)));
   const decided = new Map((await p.query<{ path: string; state: string }>(
     "SELECT path, state FROM legacy_link WHERE series_id = $1", [seriesId])).rows.map((r) => [r.path, r.state]));
+  const aliases = (await p.query<{ norm: string }>(
+    "SELECT norm FROM series_alias WHERE series_id = $1", [seriesId])).rows.map((r) => r.norm);
   // A folder already linked to another series is not available to this one.
   const takenElsewhere = new Set((await p.query<{ path: string }>(
     "SELECT path FROM legacy_link WHERE state = 'linked' AND series_id <> $1", [seriesId])).rows.map((r) => r.path));
@@ -78,7 +106,7 @@ export async function findOnDisk(seriesId: number, opts: { propose?: boolean } =
     if (takenElsewhere.has(dirPath)) continue;
     const linked = state === "linked";
     // Guesses only when asked for. Adoption acts on decisions.
-    if (!linked && !(opts.propose && looksLikeSame(s.title, d.folder))) continue;
+    if (!linked && !(opts.propose && looksLikeSame(s.title, d.folder, aliases))) continue;
     const dir = dirPath;
     // One file per chapter number, largest wins: the ledger allows exactly one, and the
     // largest file is the complete scanlation rather than a truncated retry.
@@ -107,6 +135,17 @@ export async function setLink(seriesId: number, path: string, state: "linked" | 
     `INSERT INTO legacy_link (series_id, path, state) VALUES ($1,$2,$3)
      ON CONFLICT (series_id, path) DO UPDATE SET state = EXCLUDED.state, decided_at = now()`,
     [seriesId, path, state]);
+  // Linking a folder states that its name is another name for this series, which is the
+  // fact that was missing. Recording it means a second folder with the same romanisation
+  // is recognised, and a search for the romanised name finds the series.
+  if (state === "linked") {
+    const folder = path.split("/").filter(Boolean).at(-1) ?? "";
+    if (norm(folder).length >= 3) {
+      // A duplicate alias belongs to another series, and guessing which is wrong.
+      await addAlias(seriesId, folder.replace(/_/g, " "), "folder")
+        .catch(() => console.log(`  (kept the link; "${folder}" is already an alias of another series)`));
+    }
+  }
 }
 
 export async function adoptFromDisk(seriesId: number, opts: { dryRun?: boolean; propose?: boolean } = {}): Promise<number> {
@@ -174,7 +213,10 @@ export async function diskReport(): Promise<void> {
     `SELECT l.series_id, l.path, l.state, s.title
        FROM legacy_link l JOIN series s ON s.id = l.series_id`)).rows;
   const byPath = new Map(links.map((l) => [l.path, l]));
-  const series = (await p.query<{ id: number; title: string }>("SELECT id, title FROM series")).rows;
+  const series = (await p.query<{ id: number; title: string; aliases: string[] | null }>(
+    `SELECT s.id, s.title, array_remove(array_agg(a.norm), NULL) AS aliases
+       FROM series s LEFT JOIN series_alias a ON a.series_id = s.id
+      GROUP BY s.id, s.title`)).rows;
 
   let linked = 0, ignored = 0, loose = 0, empty = 0;
   const rows: string[] = [];
@@ -187,7 +229,7 @@ export async function diskReport(): Promise<void> {
     if (l?.state === "linked") { linked++; continue; }
     if (l?.state === "ignored") { ignored++; continue; }
     loose++;
-    const guesses = series.filter((s) => looksLikeSame(s.title, d.folder));
+    const guesses = series.filter((s) => looksLikeSame(s.title, d.folder, s.aliases ?? []));
     rows.push(`  ${String(d.cbzCount).padStart(4)} files  ${d.sourceDir ? "" : "(no source dir) "}${d.folder.slice(0, 62)}`
       + (guesses.length ? `\n           looks like: ${guesses.map((g) => `${g.id} ${g.title.slice(0, 44)}`).join("; ")}`
                         : `\n           no series matches by name -- link it by hand if you know which it is`));
@@ -221,4 +263,69 @@ export async function unclaimedFolders(): Promise<Array<{ path: string; folder: 
     }))
     .filter((d) => !claimed.has(d.path))
     .sort((a, b) => b.files - a.files);
+}
+
+/**
+ * Linked folders that offer nothing the library does not already hold.
+ *
+ * Once every chapter in a folder is held, the folder is a second copy and the library
+ * tree is the one that counts. Reported with the space it would free, and deleted only
+ * when asked, because this is the one operation here that destroys something.
+ *
+ * Two guards. Only folders explicitly linked are considered, so a name-match guess can
+ * never lead to a deletion. And a folder is only redundant if every chapter number in it
+ * is held: a single chapter the ledger lacks keeps the whole folder.
+ */
+export async function redundantFolders(): Promise<Array<{
+  seriesId: number; title: string; path: string; files: number; bytes: number; heldAll: boolean;
+}>> {
+  const p = db();
+  const links = (await p.query<{ series_id: number; path: string; title: string }>(
+    `SELECT l.series_id, l.path, s.title FROM legacy_link l JOIN series s ON s.id = l.series_id
+      WHERE l.state = 'linked' ORDER BY s.title`)).rows;
+  const out: Array<{ seriesId: number; title: string; path: string; files: number; bytes: number; heldAll: boolean }> = [];
+  for (const l of links) {
+    const held = new Set((await p.query<{ n: string }>(
+      "SELECT chapter_number AS n FROM chapter WHERE series_id = $1", [l.series_id])).rows.map((r) => Number(r.n)));
+    let files = 0, bytes = 0, missing = 0;
+    let names: string[];
+    try { names = readdirSync(l.path); } catch { continue; }
+    for (const f of names) {
+      if (!/\.cbz$/i.test(f)) continue;
+      files++;
+      const n = parseChapterNumber(f);
+      // A file whose number cannot be read is not proven redundant, so it protects the folder.
+      if (n === null || !held.has(n)) { missing++; continue; }
+      try { bytes += statSync(`${l.path}/${f}`).size; } catch { /* counted as zero */ }
+    }
+    if (files > 0) out.push({ seriesId: l.series_id, title: l.title, path: l.path, files, bytes, heldAll: missing === 0 });
+  }
+  return out;
+}
+
+export async function pruneRedundant(opts: { delete?: boolean } = {}): Promise<void> {
+  const all = await redundantFolders();
+  const done = all.filter((f) => f.heldAll);
+  const keep = all.filter((f) => !f.heldAll);
+  console.log(`${all.length} linked folders: ${done.length} fully adopted, ${keep.length} still holding something`);
+  for (const f of keep) {
+    console.log(`  keeping  ${f.path}\n           ${f.files} files, some not in the library yet`);
+  }
+  if (done.length === 0) { console.log("nothing is redundant"); return; }
+  let freed = 0;
+  for (const f of done) {
+    console.log(`  ${opts.delete ? "deleting" : "redundant"} ${f.path}`);
+    console.log(`           ${f.files} files, ${(f.bytes / 1048576).toFixed(0)}MB, every chapter held for "${f.title.slice(0, 40)}"`);
+    freed += f.bytes;
+    if (!opts.delete) continue;
+    try {
+      rmSync(f.path, { recursive: true });
+      // The link goes too: the folder it pointed at is gone, and a stale link would be
+      // offered as a source of chapters that no longer exist.
+      await db().query("DELETE FROM legacy_link WHERE series_id = $1 AND path = $2", [f.seriesId, f.path]);
+    } catch (err) {
+      console.log(`           could not delete: ${err instanceof Error ? err.message.slice(0, 80) : String(err)}`);
+    }
+  }
+  console.log(`${opts.delete ? "freed" : "would free"} ${(freed / 1048576).toFixed(0)}MB across ${done.length} folders`);
 }

@@ -44,6 +44,8 @@ const usage = `kupoyomi <command>
   adopt <seriesId> [--dry-run] [--propose]  adopt chapters from folders linked to a series
   ondisk                     every legacy folder, and which are not linked to a series yet
   link <seriesId> <path> [--ignore]  record that a folder belongs to a series, or does not
+  aka <seriesId> <name> [--remove]  another name the series goes by, used to match folders
+  prune-folders [--delete]   linked folders whose every chapter is already in the library
   remove <seriesId> [--files] [--legacy]  delete a series; prints the plan without flags
   gaps <seriesId>            what is missing, and which sources carry it
   parse-check                how well chapter numbers can be read from filenames
@@ -178,6 +180,21 @@ const main = async (): Promise<void> => {
         dryRun: process.argv.includes("--dry-run"),
         propose: process.argv.includes("--propose"),
       });
+      break;
+    }
+    case "aka": {
+      const sid = Number(process.argv[3]);
+      const name = process.argv[4];
+      if (!Number.isInteger(sid) || !name) throw new Error("usage: aka <seriesId> <name> [--remove]");
+      const { addAlias, removeAlias, aliasesFor } = await import("./adopt.js");
+      if (process.argv.includes("--remove")) await removeAlias(sid, name);
+      else await addAlias(sid, name);
+      console.log((await aliasesFor(sid)).map((a) => `  ${a.alias}  (${a.origin})`).join("\n") || "  no other names");
+      break;
+    }
+    case "prune-folders": {
+      const { pruneRedundant } = await import("./adopt.js");
+      await pruneRedundant({ delete: process.argv.includes("--delete") });
       break;
     }
     case "ondisk": {

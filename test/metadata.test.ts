@@ -174,3 +174,43 @@ test("stopping a series clears its outstanding queue but keeps its history", { s
     "SELECT count(*) n FROM wanted WHERE state <> 'done'")).rows[0];
   assert.equal(Number(outstanding?.n), 0, "a stopped series adds nothing to the outstanding count");
 });
+
+/**
+ * The adoption path, which is the whole point of the project.
+ *
+ * remap used to find what was held with its own query against legacy_chapter, gated on
+ * is_downloaded. That flag lies: on Noble in Name, Vulgar at Heart it was set on 1 of 44
+ * rows while all 44 files were on disk, so a confirmed migration adopted one chapter and
+ * queued the other 43 for re-download. heldChapters lets the filesystem decide, and this
+ * asserts remap agrees with it.
+ */
+test("adoption follows the disk, not Suwayomi's downloaded flag", { skip: !haveDb }, async () => {
+  const { heldChapters } = await import("../src/held.js");
+  const { mkdirSync: mk, writeFileSync: wf } = await import("node:fs");
+  const p = db();
+
+  const DEAD = "Dead Source (EN)";
+  const FOLDER = "Flag Liar Series";
+  const dir = join(legacyRoot, DEAD, FOLDER);
+  mk(dir, { recursive: true });
+  for (const n of [1, 2, 3, 4]) wf(join(dir, `Official_Episode ${n}.cbz`), Buffer.from(`ch${n}`));
+
+  // A snapshot that claims only chapter 1 was ever downloaded, which is the shape that
+  // caused the bug.
+  const MID = 987654;
+  await p.query("DELETE FROM legacy_manga WHERE suwayomi_id = $1", [MID]);
+  await p.query(
+    `INSERT INTO legacy_manga (suwayomi_id, title, source_name, in_library, download_count)
+     VALUES ($1,$2,$3,true,1)`, [MID, FOLDER, DEAD]);
+  for (const n of [1, 2, 3, 4]) {
+    await p.query(
+      `INSERT INTO legacy_chapter (suwayomi_manga_id, chapter_number, name, is_downloaded)
+       VALUES ($1,$2,$3,$4)`, [MID, n, `Official_Episode ${n}`, n === 1]);
+  }
+
+  const held = await heldChapters(DEAD, FOLDER, MID);
+  assert.deepEqual([...held.keys()].sort((a, b) => a - b), [1, 2, 3, 4],
+    "all four files are held; the flag being set on one of them is irrelevant");
+
+  await p.query("DELETE FROM legacy_manga WHERE suwayomi_id = $1", [MID]);
+});

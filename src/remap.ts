@@ -1,12 +1,11 @@
-import { linkSync, mkdirSync, existsSync, statSync } from "node:fs";
+import { linkSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { canonical } from "./seed.js";
-import { gql, sanitize } from "./suwayomi.js";
+import { gql } from "./suwayomi.js";
 import { resolveManga } from "./match.js";
-import { scanLegacyTree } from "./disk.js";
-import { parseChapterNumber } from "./chapternum.js";
+import { heldChapters } from "./held.js";
 
 /**
  * Canonical chapter filename: "{Series} - c0070 [Group].cbz". Zero-padded so a plain
@@ -62,49 +61,30 @@ export async function remap(seriesId: number, opts: { dryRun?: boolean } = {}): 
   const offered = new Set(
     target.manga.chapters.nodes.map((c) => c.chapterNumber).filter((n): n is number => n !== null));
 
-  // What we already hold. The snapshot is authoritative where it exists; for manual
-  // downloads and series Suwayomi never recorded, fall back to reading the numbers
-  // out of the filenames.
-  let legacy: Legacy[];
-  let fromFilenames = false;
-  if (cand.suwayomi_manga_id !== null) {
-    legacy = (await p.query<Legacy>(
-      `SELECT chapter_number, name, scanlator, page_count, uploaded_at FROM legacy_chapter
-        WHERE suwayomi_manga_id = $1 AND is_downloaded AND chapter_number IS NOT NULL
-        ORDER BY chapter_number`, [cand.suwayomi_manga_id])).rows;
-  } else {
-    fromFilenames = true;
-    const dir = `${config.legacyRoot}/${cand.dead_source}/${cand.folder}`;
-    const entry = (await scanLegacyTree()).find(
-      (d) => d.sourceDir === cand.dead_source && d.folder === cand.folder);
-    // One file per chapter number is required by the ledger, so a number claimed by
-    // several files is settled on size: the largest is the complete scanlation.
-    const best = new Map<number, { file: string; size: number }>();
-    let unparseable = 0;
-    for (const f of entry?.files ?? []) {
-      const n = parseChapterNumber(f);
-      if (n === null) { unparseable++; continue; }
-      const size = statSync(`${dir}/${f}`).size;
-      const prev = best.get(n);
-      if (!prev || size > prev.size) best.set(n, { file: f, size });
-    }
-    if (unparseable > 0) console.log(`  ${unparseable} filenames carry no chapter number and are skipped`);
-    legacy = [...best.entries()].sort((a, b) => a[0] - b[0]).map(([n, v]) => ({
-      chapter_number: String(n),
-      name: v.file.replace(/\.cbz$/i, ""),
-      scanlator: null, page_count: null, uploaded_at: null,
-    }));
-  }
+  // What we already hold, from heldChapters: the same function the review page uses to
+  // say "you hold 44 chapters, 1-44".
+  //
+  // This used to run its own query against legacy_chapter gated on is_downloaded, and
+  // that flag lies. On Noble in Name, Vulgar at Heart it was set on 1 of 44 rows while
+  // all 44 files sat on disk, so a confirmed migration adopted one chapter and queued
+  // the other 43 for re-download. Suwayomi's flag has been wrong in both directions
+  // here, 157 chapters flagged with no file and 43 files it did not know about, which
+  // is why heldChapters lets the filesystem decide and uses the snapshot only to
+  // enrich. Two code paths disagreeing about what is on disk is how bytes get spent
+  // twice, which is the one thing this project exists to prevent.
+  const held = await heldChapters(cand.dead_source, cand.folder, cand.suwayomi_manga_id);
+  const legacy: Legacy[] = [...held.entries()].sort((a, b) => a[0] - b[0]).map(([n, h]) => ({
+    chapter_number: String(n),
+    // Already the exact on-disk stem, so it must not be sanitized again.
+    name: h.file.replace(/\.cbz$/i, ""),
+    scanlator: h.scanlator, page_count: h.pageCount, uploaded_at: h.uploadedAt,
+  }));
 
   const targetDir = `${config.libraryRoot}/${series.folder}`;
   let adopted = 0, absent = 0, alreadyThere = 0, notOffered = 0;
 
   for (const c of legacy) {
-    // When read from filenames, name IS the on-disk stem, so it must not be re-sanitized.
-    const base = fromFilenames
-      ? (c.name ?? "")
-      : (c.scanlator ? `${sanitize(c.scanlator)}_${sanitize(c.name ?? "")}` : sanitize(c.name ?? ""));
-    const src = `${config.legacyRoot}/${cand.dead_source}/${cand.folder}/${base}.cbz`;
+    const src = `${config.legacyRoot}/${cand.dead_source}/${cand.folder}/${c.name ?? ""}.cbz`;
     if (!existsSync(src)) { absent++; continue; }          // Suwayomi's flag lied again
     if (!offered.has(Number(c.chapter_number))) { notOffered++; }
 
@@ -119,10 +99,9 @@ export async function remap(seriesId: number, opts: { dryRun?: boolean } = {}): 
     if (r.rowCount === 0) alreadyThere++; else adopted++;
   }
 
-  const held = new Set(legacy.map((c) => Number(c.chapter_number)));
   const toFetch = [...offered].filter((n) => !held.has(n)).sort((a, b) => a - b);
 
-  console.log(`${opts.dryRun ? "[dry run] " : ""}${series.title}${fromFilenames ? " (numbers read from filenames)" : ""}`);
+  console.log(`${opts.dryRun ? "[dry run] " : ""}${series.title}`);
   console.log(`  adopted from disk      ${adopted}${alreadyThere ? ` (${alreadyThere} already in ledger)` : ""}`);
   console.log(`  files Suwayomi lied about ${absent}`);
   console.log(`  held but not offered by the new source ${notOffered}`);

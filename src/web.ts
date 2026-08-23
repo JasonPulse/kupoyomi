@@ -2,6 +2,8 @@ import { db } from "./db.js";
 import { confirmCandidate } from "./confirm.js";
 import { fmt, ago } from "./held.js";
 import { archiveCandidate } from "./archive.js";
+import { remap } from "./remap.js";
+import { scanWanted } from "./fetch.js";
 
 import { esc, page } from "./ui/layout.js";
 
@@ -186,5 +188,21 @@ export async function handleConfirmPost(body: string): Promise<string> {
   const pick = Number(params.get("pick"));
   if (!Number.isInteger(id) || !Number.isInteger(pick)) throw new Error("bad form");
   await confirmCandidate(id, pick);
+  // Adopt the stranded files before anything scans.
+  //
+  // confirmCandidate only records the binding and prints "will be adopted on the next
+  // remap", and remap was a CLI command nobody ran. So the scheduler's next scan found
+  // an empty ledger and queued the whole series: Noble in Name, Vulgar at Heart had 44
+  // chapters on disk and 50 queued for download. Awaited, because a scan that starts
+  // first sees no chapters and queues all of them.
+  const sid = (await db().query<{ n: number | null }>(
+    "SELECT confirmed_series_id AS n FROM import_candidate WHERE id = $1", [id])).rows[0]?.n;
+  if (sid) {
+    await remap(sid).catch((e: unknown) => {
+      console.log(`remap after confirm failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
+    // Now the ledger knows what is held, so this queues only what is genuinely missing.
+    void scanWanted({ seriesId: sid }).catch(() => undefined);
+  }
   return "/review";
 }

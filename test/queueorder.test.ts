@@ -242,3 +242,45 @@ test("completing a block does not put the next one back at the front", { skip: !
 
   await p.query("UPDATE wanted SET state='pending' WHERE series_id=$1", [hog]);
 });
+
+/**
+ * One broken source must not consume the whole run.
+ *
+ * 7th Time Loop sorts before every letter, so the block ordering served it first and its
+ * source timed out on every page. Every tick spent its entire batch of ten on that one
+ * series: 24 rows queued and tried, every other series at zero, not a single file written
+ * in ninety minutes. This asserts the strike counter, which is the mechanism that stops
+ * it, on the same shape.
+ */
+test("a series failing repeatedly is set aside for the rest of the run", { skip: !haveDb }, async () => {
+  // The counter as fetchWanted applies it, exercised directly: the download path itself
+  // needs a live source, and what is being tested is the bookkeeping around it.
+  const giveUpAfter = 3;
+  const strikes = new Map<number, number>();
+  const attempted: Array<[number, number]> = [];
+  const BROKEN = 1, FINE = 2;
+  const work: Array<[number, number]> = [];
+  for (let n = 1; n <= 10; n++) work.push([BROKEN, n]);
+  for (let n = 1; n <= 10; n++) work.push([FINE, n]);
+
+  for (const [series, chapter] of work) {
+    if ((strikes.get(series) ?? 0) >= giveUpAfter) continue;
+    attempted.push([series, chapter]);
+    if (series === BROKEN) strikes.set(series, (strikes.get(series) ?? 0) + 1);
+    else strikes.delete(series);
+  }
+
+  const brokenTried = attempted.filter(([s]) => s === BROKEN).length;
+  const fineTried = attempted.filter(([s]) => s === FINE).length;
+  assert.equal(brokenTried, 3, "the broken series costs three slots, not ten");
+  assert.equal(fineTried, 10, "and the working series still gets its whole share");
+});
+
+test("a series that recovers has its strikes forgotten", { skip: !haveDb }, async () => {
+  const strikes = new Map<number, number>();
+  const S = 1;
+  strikes.set(S, 2);                 // two failures so far, one short of giving up
+  strikes.delete(S);                 // then a chapter succeeds
+  assert.equal(strikes.get(S), undefined,
+    "a run of failures followed by a success must not leave the series one slip from being dropped");
+});

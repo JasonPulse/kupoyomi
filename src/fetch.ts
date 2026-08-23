@@ -158,9 +158,21 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
 
   let done = 0, failed = 0, bytes = 0;
   const queues = [...bySource.values()];
+  // How many failures in a row a series is allowed before this run gives up on it.
+  //
+  // 7th Time Loop sorts before every letter, so the block ordering served it first, and
+  // its source timed out on every page. Every tick spent its whole batch of ten on that
+  // one series and nothing else was attempted once: 24 rows queued and tried, every
+  // other series at zero, no file written in ninety minutes. A source that is down must
+  // cost a few slots, not the entire run.
+  const giveUpAfter = Number(process.env["FETCH_SERIES_STRIKES"] ?? 3);
+  const strikes = new Map<number, number>();
+  let skipped = 0;
+
   const runSource = async (items: typeof rows): Promise<void> => {
     const resolved = new Map<number, number>();     // binding id -> local manga id
     for (const it of items) {
+      if ((strikes.get(it.series_id) ?? 0) >= giveUpAfter) { skipped++; continue; }
       try {
         let mangaId = resolved.get(it.binding_id);
         if (mangaId === undefined) {
@@ -227,9 +239,15 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
           "UPDATE wanted SET state='done', finished_at=now(), attempts=attempts+1, last_error=NULL WHERE series_id=$1 AND chapter_number=$2",
           [it.series_id, it.chapter_number]);
         done++;
+        strikes.delete(it.series_id);   // it works after all, so the count starts over
         console.log(`  ok  ${it.title.slice(0, 34).padEnd(34)} ch ${it.chapter_number.padStart(8)}  ${images.length}p`);
       } catch (err) {
         failed++;
+        const n = (strikes.get(it.series_id) ?? 0) + 1;
+        strikes.set(it.series_id, n);
+        if (n === giveUpAfter) {
+          console.log(`  -- ${it.title.slice(0, 34)}: ${n} failures in a row, leaving the rest of it for the next run`);
+        }
         const msg = err instanceof Error ? err.message.slice(0, 300) : String(err);
         await p.query(
           "UPDATE wanted SET state='failed', attempts=attempts+1, last_error=$3 WHERE series_id=$1 AND chapter_number=$2",
@@ -242,5 +260,6 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
   for (let i = 0; i < queues.length; i += concurrency) {
     await Promise.all(queues.slice(i, i + concurrency).map(runSource));
   }
-  console.log(`\ndownloaded ${done}, failed ${failed}, ${(bytes / 1048576).toFixed(0)}MB`);
+  console.log(`\ndownloaded ${done}, failed ${failed}, ${(bytes / 1048576).toFixed(0)}MB` +
+    (skipped > 0 ? `, ${skipped} left for the next run behind a series that kept failing` : ""));
 }

@@ -58,6 +58,47 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
   console.log(`checked ${checked} of ${bindings.length} bindings, queued ${queued} new; ${total?.n ?? 0} outstanding`);
 }
 
+export type WantedRow = {
+  series_id: number; chapter_number: string; binding_id: number; source_id: string;
+  source_name: string; source_url: string | null; title: string; folder: string; attempts: number;
+};
+
+/** The queue's serving order. Separated from the download loop so it can be proven. */
+export async function nextWanted(limit?: number, blockSize?: number): Promise<WantedRow[]> {
+  const block = Math.max(1, Number(blockSize ?? process.env["FETCH_BLOCK"] ?? 25));
+  // Round-robin by block, not one series start to finish.
+  //
+  // Ordering by title alone drained the alphabetically-first series completely before
+  // touching the next, so a series near the end of the alphabet waited behind every
+  // backlog in front of it: over a day for something the owner wanted to read.
+  //
+  // Each outstanding chapter is ranked within its own series, and the rank divided by
+  // the block size gives a block number. Ordering by block first means every series
+  // gets its first 25 before any series gets its second 25. That needs no cursor and
+  // no new column, so it cannot drift out of step with the queue or lose its place on
+  // a restart, and a series added today lands in block 0 and starts immediately.
+  return (await db().query<WantedRow>(
+    `WITH ranked AS (
+       SELECT w.series_id, w.chapter_number, w.binding_id, w.attempts,
+              row_number() OVER (PARTITION BY w.series_id ORDER BY w.chapter_number) AS rn
+         FROM wanted w
+         JOIN series s ON s.id = w.series_id
+        WHERE w.state IN ('pending','failed','fetching') AND w.attempts < 4
+          -- A muted series is one the owner has told to stop. Its backlog is deleted
+          -- when it stops, so this is a backstop against rows arriving by another route.
+          AND NOT s.muted
+     )
+     SELECT r.series_id, r.chapter_number, r.binding_id, b.source_id, b.source_name,
+            b.source_url, s.title, s.folder, r.attempts
+       FROM ranked r
+       JOIN series_binding b ON b.id = r.binding_id
+       JOIN series s ON s.id = r.series_id
+      -- Block first, then title so a series' own block stays contiguous and the
+      -- downloader keeps hitting one source at a time rather than hopping.
+      ORDER BY (r.rn - 1) / ${block}, s.title, r.chapter_number
+      ${limit ? `LIMIT ${Number(limit)}` : ""}`)).rows;
+}
+
 /**
  * Downloads queued chapters.
  *
@@ -69,19 +110,7 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
 export async function fetchWanted(opts: { limit?: number; concurrency?: number } = {}): Promise<void> {
   const p = db();
   const concurrency = opts.concurrency ?? 6;
-  const rows = (await p.query<{ series_id: number; chapter_number: string; binding_id: number; source_id: string; source_name: string; source_url: string | null; title: string; folder: string; attempts: number }>(
-    `SELECT w.series_id, w.chapter_number, w.binding_id, b.source_id, b.source_name, b.source_url,
-            s.title, s.folder, w.attempts
-       FROM wanted w
-       JOIN series_binding b ON b.id = w.binding_id
-       JOIN series s ON s.id = w.series_id
-      WHERE w.state IN ('pending','failed','fetching') AND w.attempts < 4
-        -- A muted series is one the owner has told to stop. A backlog that keeps
-        -- trickling in for weeks afterwards is still updates arriving, so it pauses
-        -- here rather than being deleted, and unmuting resumes exactly where it stopped.
-        AND NOT s.muted
-      ORDER BY s.title, w.chapter_number
-      ${opts.limit ? `LIMIT ${Number(opts.limit)}` : ""}`)).rows;
+  const rows = await nextWanted(opts.limit);
   if (rows.length === 0) { console.log("nothing queued"); return; }
 
   const bySource = new Map<string, typeof rows>();

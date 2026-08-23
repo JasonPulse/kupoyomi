@@ -23,6 +23,12 @@ export async function seriesPage(id: number): Promise<string> {
   // read state entirely on the device: ChapterProgressManager marks a chapter complete
   // locally and never calls out. Trackers, which do call out, are a separate extension
   // type from a separate repository, so a source cannot be one.
+  // Folders on disk that belong to this series, plus name-match guesses to confirm.
+  // Chapters in an unlinked folder are invisible to the library and get downloaded again.
+  const { findOnDisk } = await import("../adopt.js");
+  const disk = await findOnDisk(id, { propose: true }).catch(() => ({ sources: [] as Array<{
+    path: string; folder: string; linked: boolean; alreadyHeld: number; offers: Map<number, string>;
+  }> }));
   const readRows = (await p.query<{ chapter_number: string; completed: boolean }>(
     "SELECT chapter_number, completed FROM read_progress WHERE series_id = $1", [id])).rows;
   const readSet = new Set(readRows.filter((r) => r.completed).map((r) => fmt(r.chapter_number)));
@@ -117,6 +123,31 @@ export async function seriesPage(id: number): Promise<string> {
              : ""}</span>
        </div>
      </div>
+     ${disk.sources.length === 0 ? "" : `<div class="card"><div class="title">Files on disk</div>
+       <div class="meta">The library tree is the source of truth, and these are the old folders a
+         chapter can be taken from without downloading it. Nothing here is deleted or moved: adopting
+         hardlinks the file, so it costs no space and the old folder stays exactly as it is.</div>
+       <table style="margin-top:10px"><tr><th>folder</th><th>held</th><th>can adopt</th><th></th></tr>
+       ${disk.sources.map((d) => `<tr>
+         <td style="font-size:12px;word-break:break-all">${esc(d.path.replace(/^.*?\/data\//, "/data/"))}
+           ${d.linked ? '<span class="badge">linked</span>' : '<span class="badge" style="color:#8a5a12">guess</span>'}</td>
+         <td class="dim">${d.alreadyHeld}</td>
+         <td class="${d.offers.size > 0 ? "rec" : "dim"}">${d.offers.size > 0
+           ? `${d.offers.size}: ${[...d.offers.keys()].sort((a, b) => a - b).slice(0, 8).join(", ")}${d.offers.size > 8 ? " ..." : ""}`
+           : "nothing new"}</td>
+         <td class="act">
+           ${d.linked
+             ? (d.offers.size > 0
+                 ? `<form method="post" action="/series/${id}/adopt"><button type="submit">adopt ${d.offers.size}</button></form>`
+                 : "")
+               + `<form method="post" action="/series/${id}/link"><input type="hidden" name="path" value="${esc(d.path)}">
+                  <input type="hidden" name="state" value="ignored"><button class="weak" type="submit">unlink</button></form>`
+             : `<form method="post" action="/series/${id}/link"><input type="hidden" name="path" value="${esc(d.path)}">
+                  <input type="hidden" name="state" value="linked"><button type="submit">this is it</button></form>`
+               + `<form method="post" action="/series/${id}/link"><input type="hidden" name="path" value="${esc(d.path)}">
+                  <input type="hidden" name="state" value="ignored"><button class="weak" type="submit">not this</button></form>`}
+         </td></tr>`).join("")}</table>
+     </div>`}
      <div class="card"><div class="title">Updates</div>
        <div class="actions" style="margin:0">
          <form method="post" action="/series/${id}/mute">

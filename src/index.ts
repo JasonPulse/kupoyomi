@@ -41,7 +41,9 @@ const usage = `kupoyomi <command>
   stalled                    flag series whose source has gone quiet
   metadata [--force]         fetch covers and synopses for series missing them
   paid [--dry-run]           uninstall paid-subscription sources and report what used them
-  adopt <seriesId> [--dry-run]  adopt chapters already on disk, from every folder holding them
+  adopt <seriesId> [--dry-run] [--propose]  adopt chapters from folders linked to a series
+  ondisk                     every legacy folder, and which are not linked to a series yet
+  link <seriesId> <path> [--ignore]  record that a folder belongs to a series, or does not
   remove <seriesId> [--files] [--legacy]  delete a series; prints the plan without flags
   gaps <seriesId>            what is missing, and which sources carry it
   parse-check                how well chapter numbers can be read from filenames
@@ -170,9 +172,26 @@ const main = async (): Promise<void> => {
     }
     case "adopt": {
       const sid = Number(process.argv[3]);
-      if (!Number.isInteger(sid)) throw new Error("usage: adopt <seriesId> [--dry-run]");
+      if (!Number.isInteger(sid)) throw new Error("usage: adopt <seriesId> [--dry-run] [--propose]");
       const { adoptFromDisk } = await import("./adopt.js");
-      await adoptFromDisk(sid, { dryRun: process.argv.includes("--dry-run") });
+      await adoptFromDisk(sid, {
+        dryRun: process.argv.includes("--dry-run"),
+        propose: process.argv.includes("--propose"),
+      });
+      break;
+    }
+    case "ondisk": {
+      const { diskReport } = await import("./adopt.js");
+      await diskReport();
+      break;
+    }
+    case "link": {
+      const sid = Number(process.argv[3]);
+      const path = process.argv[4];
+      if (!Number.isInteger(sid) || !path) throw new Error("usage: link <seriesId> <path> [--ignore]");
+      const { setLink } = await import("./adopt.js");
+      await setLink(sid, path, process.argv.includes("--ignore") ? "ignored" : "linked");
+      console.log(`${process.argv.includes("--ignore") ? "ignoring" : "linked"} ${path} for series ${sid}`);
       break;
     }
     case "paid": {

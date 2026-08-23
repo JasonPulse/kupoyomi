@@ -327,3 +327,77 @@ test("without a series id, a title differing only in case still attaches", { ski
   assert.equal(Number(count?.n), 1);
   await p.query("DELETE FROM series WHERE id = $1", [id]);
 });
+
+/**
+ * Linking a folder on disk to a series.
+ *
+ * Adoption used to read one import_candidate folder per series, so 7th Time Loop's
+ * hand-made second folder was invisible and its chapters 1, 5.5 and 21.5 went back on the
+ * download queue while sitting on disk. Eleven more such folders exist. Name similarity
+ * can propose a link but must not decide one, because "Kusuriya_no_Hitorigoto" and "The
+ * Apothecary Diaries" are the same work and share no letters.
+ */
+test("adoption acts on a linked folder and never on a guess", { skip: !haveDb }, async () => {
+  const { findOnDisk, adoptFromDisk, setLink } = await import("../src/adopt.js");
+  const { mkdirSync: mk, writeFileSync: wf } = await import("node:fs");
+  const p = db();
+  const TITLE = "Linkable Test Series";
+  await p.query("DELETE FROM series WHERE title = $1", [TITLE]);
+  const s = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [TITLE]);
+  const sid = s.rows[0]!.id;
+
+  // A hand-made folder, underscores and all, holding chapters the series does not have.
+  const legacy = join(legacyRoot, "Linkable_Test_Series");
+  mk(legacy, { recursive: true });
+  for (const n of [1, 2, "2.5"]) wf(join(legacy, `Chapter ${n}.cbz`), Buffer.from(`ch${n}`));
+
+  // A guess is visible only when asked for, and adoption refuses to act on it.
+  assert.equal((await findOnDisk(sid)).sources.length, 0, "nothing is linked yet");
+  const proposed = await findOnDisk(sid, { propose: true });
+  assert.equal(proposed.sources.length, 1, "the name match is offered as a proposal");
+  assert.equal(proposed.sources[0]?.linked, false, "and it is marked as a guess");
+  assert.equal(await adoptFromDisk(sid, { propose: true }), 0,
+    "a proposal must never be adopted: confirming it is the whole point");
+
+  await setLink(sid, legacy, "linked");
+  const adopted = await adoptFromDisk(sid);
+  assert.equal(adopted, 3, "once linked, all three chapters are adopted");
+  const held = (await p.query<{ n: string }>(
+    "SELECT chapter_number AS n FROM chapter WHERE series_id = $1 ORDER BY chapter_number", [sid])).rows;
+  assert.deepEqual(held.map((r) => Number(r.n)), [1, 2, 2.5], "decimals included");
+
+  // Adopting twice must not double anything, and the legacy files must survive.
+  assert.equal(await adoptFromDisk(sid), 0, "nothing left to adopt, and running it again is harmless");
+  assert.ok(existsSync(join(legacy, "Chapter 1.cbz")), "the legacy folder is untouched");
+
+  await setLink(sid, legacy, "ignored");
+  assert.equal((await findOnDisk(sid, { propose: true })).sources.length, 0,
+    "an ignored folder is never offered again");
+
+  await p.query("DELETE FROM series WHERE id = $1", [sid]);
+});
+
+test("a folder linked to one series is not offered to another", { skip: !haveDb }, async () => {
+  const { findOnDisk, setLink } = await import("../src/adopt.js");
+  const { mkdirSync: mk, writeFileSync: wf } = await import("node:fs");
+  const p = db();
+  const A = "Shared Folder Series A", B = "Shared Folder Series B";
+  for (const t of [A, B]) await p.query("DELETE FROM series WHERE title = $1", [t]);
+  const ids: number[] = [];
+  for (const t of [A, B]) {
+    const r = await p.query<{ id: number }>(
+      "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [t]);
+    ids.push(r.rows[0]!.id);
+  }
+  const legacy = join(legacyRoot, "Shared_Folder_Series");
+  mk(legacy, { recursive: true });
+  wf(join(legacy, "Chapter 1.cbz"), Buffer.from("x"));
+
+  await setLink(ids[0]!, legacy, "linked");
+  const forB = await findOnDisk(ids[1]!, { propose: true });
+  assert.equal(forB.sources.length, 0,
+    "two series adopting one file would give both the same chapter and one the wrong story");
+
+  for (const id of ids) await p.query("DELETE FROM series WHERE id = $1", [id]);
+});

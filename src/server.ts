@@ -409,6 +409,19 @@ export async function serve(): Promise<void> {
         }
         const meta = /^\/series\/(\d+)\/metadata$/.exec(path);
         if (meta) { await refreshMetadata(Number(meta[1])); return `/series/${meta[1]}`; }
+        const link = /^\/series\/(\d+)\/link$/.exec(path);
+        if (link) {
+          const { setLink } = await import("./adopt.js");
+          const st = form.get("state") === "ignored" ? "ignored" : "linked";
+          await setLink(Number(link[1]), form.get("path") ?? "", st);
+          return `/series/${link[1]}`;
+        }
+        const doAdopt = /^\/series\/(\d+)\/adopt$/.exec(path);
+        if (doAdopt) {
+          const { adoptFromDisk } = await import("./adopt.js");
+          await adoptFromDisk(Number(doAdopt[1]));
+          return `/series/${doAdopt[1]}`;
+        }
         const read = /^\/series\/(\d+)\/read$/.exec(path);
         if (read) {
           // form, not readBody: the body is consumed once at the top of this handler, and

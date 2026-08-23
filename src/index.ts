@@ -41,6 +41,7 @@ const usage = `kupoyomi <command>
   stalled                    flag series whose source has gone quiet
   metadata [--force]         fetch covers and synopses for series missing them
   paid [--dry-run]           uninstall paid-subscription sources and report what used them
+  adopt <seriesId> [--dry-run]  adopt chapters already on disk, from every folder holding them
   remove <seriesId> [--files] [--legacy]  delete a series; prints the plan without flags
   gaps <seriesId>            what is missing, and which sources carry it
   parse-check                how well chapter numbers can be read from filenames
@@ -165,6 +166,13 @@ const main = async (): Promise<void> => {
         console.log(`  removed ${r.rows} series row, ${r.deletedFiles} files, ${r.deletedDirs.length} folders`);
       }
       await closeDb();
+      break;
+    }
+    case "adopt": {
+      const sid = Number(process.argv[3]);
+      if (!Number.isInteger(sid)) throw new Error("usage: adopt <seriesId> [--dry-run]");
+      const { adoptFromDisk } = await import("./adopt.js");
+      await adoptFromDisk(sid, { dryRun: process.argv.includes("--dry-run") });
       break;
     }
     case "paid": {

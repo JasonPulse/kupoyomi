@@ -140,3 +140,35 @@ test("a source reporting no upload date reads as unknown, not as 1970", () => {
   assert.match(ago("2021-12-25", today), /^2021-12-25 \(4\.7y ago\)$/);
   assert.match(ago("1999-06-01", today), /^1999-06-01 \(/);
 });
+
+// --- descriptions that are site copy rather than a synopsis ---------------------------
+const { looksLikeSiteCopy } = await import("../src/metadata.js");
+
+test("aggregator site copy is not accepted as a synopsis", () => {
+  // The shape ManhwaZone returns: what the manhwa is, with a score, not what happens.
+  assert.equal(looksLikeSiteCopy(
+    "Kill the Villainess has breathtaking visuals and got 4.5/5 on anidb. Read it online "
+    + "for free in high quality, updated daily."), true);
+  assert.equal(looksLikeSiteCopy(
+    "Read Kill the Villainess manga online for free. Bookmark this page for the latest chapters."), true);
+  assert.equal(looksLikeSiteCopy("You can read the newest chapters here, updated weekly."), true);
+});
+
+test("a real synopsis survives, even one that mentions a rating or the medium", () => {
+  // The genuine description for this series, which must not be discarded.
+  assert.equal(looksLikeSiteCopy(
+    "I reincarnated in a novel inside the body of a villainess named Eris who poisoned "
+    + "herself when her fiance, the prince, married her childhood friend, the maid Helena. "
+    + "From the moment I realized this, I had only one goal. Escape from the world in this novel."),
+    false);
+  assert.equal(looksLikeSiteCopy(
+    "Mimori Touka has always been something of a background character in his high school. "
+    + "So when he and his classmates are summoned to a fantasy land and gifted with incredible "
+    + "skills, it seems like the perfect opportunity to make a name for himself."), false);
+  // One passing mention in a long synopsis is not enough to reject it.
+  assert.equal(looksLikeSiteCopy(
+    "A long and detailed account of a webtoon artist who moves to the city, takes a job at a "
+    + "failing studio, and slowly rebuilds both the studio and herself over the course of the "
+    + "story, which spans several years and a large cast of colleagues and rivals she comes to "
+    + "understand only after losing most of them to the industry she loves."), false);
+});

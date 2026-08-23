@@ -16,6 +16,38 @@ const httpBase = (): string => config.suwayomiUrl.replace(/\/api\/graphql\/?$/, 
  * here is what lets komf go.
  */
 /**
+ * Whether a description is site copy rather than a synopsis.
+ *
+ * Descriptions come straight from the source, and aggregators write for search engines
+ * instead of readers: "breathtaking visuals", a score out of five, an invitation to read
+ * online and bookmark the page. That is not what the series is about, and storing it
+ * means the real synopsis never gets looked for again.
+ *
+ * Two signals have to agree, because a genuine synopsis can mention a title or a rating
+ * in passing and should not be thrown away for it.
+ */
+export function looksLikeSiteCopy(text: string): boolean {
+  const t = text.toLowerCase();
+  const tells = [
+    /\bread (?:it )?(?:online|for free|the latest)/,
+    /\byou can read\b/,
+    /\b(?:bookmark|scroll down|click here|sign ?up)\b/,
+    /\b\d(?:\.\d)?\s*(?:\/|out of)\s*(?:5|10)\b/,
+    /\b(?:anidb|myanimelist|mal|anilist|goodreads)\b/,
+    /\bupdated? (?:daily|weekly|regularly)\b/,
+    /\b(?:manga|manhwa|manhua|webtoon|comic)s? (?:online|website|site|reader)\b/,
+    /\b(?:latest|newest) chapters?\b/,
+    /\b(?:high|hd) quality\b/,
+    /\bbreathtaking\b/,
+    /\bmust[- ]read\b/,
+    /\bfor free\b/,
+  ];
+  const hits = tells.filter((re) => re.test(t)).length;
+  // A short blob that trips even one of these is almost certainly not a synopsis.
+  return hits >= 2 || (hits >= 1 && t.length < 240);
+}
+
+/**
  * Cover and synopsis taken from the files themselves, needing no source at all.
  *
  * An archived series has no binding by design -- there will never be another chapter, so
@@ -100,6 +132,10 @@ export async function refreshMetadata(seriesId: number): Promise<{ cover: boolea
     { id: mangaId }).catch(() => undefined);
   const d = (await gql<{ manga: { description: string | null; status: string; thumbnailUrl: string | null } }>(
     `{ manga(id:${mangaId}) { description status thumbnailUrl } }`)).manga;
+  if (d.description && looksLikeSiteCopy(d.description)) {
+    console.log(`  ignoring the description from this source: it is site copy, not a synopsis`);
+    d.description = null;
+  }
 
   let coverPath: string | null = null;
   if (d.thumbnailUrl) {

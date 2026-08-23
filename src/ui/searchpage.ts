@@ -46,7 +46,23 @@ function render(g) {
   }
   // Most chapters first, then prefer an English release over a translated one.
   const en = r => /english/i.test(r.variant||'') ? 0 : 1;
-  const best = [...g.rows].sort((a,b)=>(b.chapters??-1)-(a.chapters??-1) || en(a)-en(b));
+  const sorted = [...g.rows].sort((a,b)=>(b.chapters??-1)-(a.chapters??-1) || en(a)-en(b));
+  // A site listing the same series twice under the same name is a duplicate row, not a
+  // choice. MangaToday returned two entries, both 125 chapters and both 2024-01-02, and
+  // the only difference was that one named a scanlator. Rows that agree on source,
+  // count and date collapse into one, keeping whichever names a release, and only once
+  // both counts are known so an unanswered row is never folded away.
+  const best = [];
+  for (const r of sorted) {
+    const dup = best.find(o => o.sourceName === r.sourceName
+      && typeof o.chapters === 'number' && typeof r.chapters === 'number'
+      && o.chapters === r.chapters && (o.lastUpload || '') === (r.lastUpload || ''));
+    if (!dup) { best.push(r); continue; }
+    if (!dup.variant && r.variant) best[best.indexOf(dup)] = r;
+  }
+  // What is left can still repeat a source with a different count, which is a genuinely
+  // different entry on that site. The url is the only thing that tells them apart.
+  const repeated = new Set(best.map(r => r.sourceName).filter((n,i,a) => a.indexOf(n) !== i));
   // The median of what the group's sources report. ComicK listed 319 for a series every
   // other source put at 128, because it counts every language at once. Silently mixing
   // that in with the rest invites picking it as the fullest source.
@@ -60,7 +76,7 @@ function render(g) {
       (g.thumb ? '<img class="cover" loading="lazy" src="'+g.thumb+'">' : '<div class="cover"></div>') +
       '<div class="srch-body"><div class="title">'+g.title+
         (g.have ? ' <a class="badge" href="/series/'+g.have+'">in library</a>' : '')+'</div>'+
-        '<div class="meta">'+g.rows.length+' release'+(g.rows.length===1?'':'s')+
+        '<div class="meta">'+best.length+' release'+(best.length===1?'':'s')+
           (g.genres && g.genres.length ? ' &middot; '+g.genres.slice(0,5).join(', ') : '')+'</div>'+
         desc+
       '</div></div>' +
@@ -72,7 +88,10 @@ function render(g) {
       const odd = median > 0 && known && r.chapters > 0
         && (r.chapters > median * 1.6 || r.chapters < median * 0.5);
       return '<tr>' +
-        '<td>'+r.sourceName+(r.nsfw?' <span class="dim">18+</span>':'')+'</td>' +
+        '<td>'+r.sourceName+(r.nsfw?' <span class="dim">18+</span>':'')+
+          (repeated.has(r.sourceName) && r.url
+            ? '<div class="dim" style="font-size:10.5px">'+String(r.url).slice(-40).replace(/</g,'&lt;')+'</div>'
+            : '')+'</td>' +
         '<td class="dim">'+(r.variant || '-')+'</td>' +
         '<td class="'+(empty?'bad':thin||odd?'warn':known?'rec':'dim')+'">'+(known ? r.chapters : '<span class="spin">checking</span>')+
           (odd ? '<div class="dim" style="font-size:10.5px" title="the other sources report about '+median+

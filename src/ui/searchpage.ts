@@ -76,7 +76,8 @@ function render(g) {
       (g.thumb ? '<img class="cover" loading="lazy" src="'+g.thumb+'">' : '<div class="cover"></div>') +
       '<div class="srch-body"><div class="title">'+g.title+
         (g.have ? ' <a class="badge" href="/series/'+g.have+'">in library</a>' : '')+'</div>'+
-        '<div class="meta">'+best.length+' release'+(best.length===1?'':'s')+
+        '<div class="meta">'+best.length+' unique release'+(best.length===1?'':'s')+
+          (g.rows.length !== best.length ? ' <span class="dim">('+g.rows.length+' listed in total)</span>' : '')+
           (g.genres && g.genres.length ? ' &middot; '+g.genres.slice(0,5).join(', ') : '')+'</div>'+
         desc+
       '</div></div>' +
@@ -87,19 +88,25 @@ function render(g) {
       const thin = known && r.chapters > 0 && r.chapters < 3;
       const odd = median > 0 && known && r.chapters > 0
         && (r.chapters > median * 1.6 || r.chapters < median * 0.5);
+      // A source uploading each chapter several times over reports far more rows than it
+      // has chapters. ComicK listed 319 for a series that stops at 93.
+      const padded = known && r.total > r.chapters * 1.15;
       return '<tr>' +
         '<td>'+r.sourceName+(r.nsfw?' <span class="dim">18+</span>':'')+
           (repeated.has(r.sourceName) && r.url
             ? '<div class="dim" style="font-size:10.5px">'+String(r.url).slice(-40).replace(/</g,'&lt;')+'</div>'
             : '')+'</td>' +
         '<td class="dim">'+(r.variant || '-')+'</td>' +
-        '<td class="'+(empty?'bad':thin||odd?'warn':known?'rec':'dim')+'">'+(known ? r.chapters : '<span class="spin">checking</span>')+
-          (odd ? '<div class="dim" style="font-size:10.5px" title="the other sources report about '+median+
-                 ', so this is probably a different run, or every language counted together">unlike the rest</div>' : '')+'</td>' +
+        '<td class="'+(empty?'bad':thin||odd?'warn':known?'rec':'dim')+'">'+
+          (known ? r.chapters : '<span class="spin">checking</span>')+
+          (known && r.highest ? '<div class="dim" style="font-size:10.5px">up to ch '+r.highest+'</div>' : '')+
+          (padded ? '<div class="warn" style="font-size:10.5px">'+r.total+' uploads, so most chapters are here more than once</div>' : '')+
+          (odd && !padded ? '<div class="warn" style="font-size:10.5px">most sources say about '+median+'</div>' : '')+
+          '</td>' +
         '<td class="dim">'+(r.lastUpload || '-')+'</td>' +
-        '<td class="act"><a class="series" style="margin-right:8px;font-size:11px" href="/preview?source='+
+        '<td class="act"><a href="/preview?source='+
           encodeURIComponent(r.sourceId)+'&url='+encodeURIComponent(r.url)+'&title='+encodeURIComponent(r.title)+
-          '">details</a>' + (empty
+          '" style="text-decoration:none"><button type="button" class="weak">details</button></a>' + (empty
           ? '<span class="dim" title="this source lists the series but carries no chapters">empty</span>'
           : '<form class="addf" method="post" action="/add">' +
             '<input type="hidden" name="title" value="'+r.title.replace(/"/g,'&quot;')+'">' +
@@ -208,8 +215,11 @@ table.srcs th:nth-child(2),table.srcs td:nth-child(2){max-width:220px}
 table.srcs th:nth-child(3),table.srcs td:nth-child(3){width:88px}
 table.srcs th:nth-child(4),table.srcs td:nth-child(4){width:110px}
 table.srcs th:nth-child(5),table.srcs td:nth-child(5){width:96px;text-align:right}
-td.act{text-align:right}
-td.act form{display:inline}
+/* Side by side, not stacked. Stacked, the details link sat directly above the add
+   button and on a phone the two were a thumb-width apart. */
+td.act{text-align:right;white-space:nowrap}
+td.act > *{display:inline-block;vertical-align:middle}
+td.act form{display:inline-block;margin-left:6px}
 .spin{color:#7a6d58;font-size:11px}
 button[disabled]{opacity:.4;cursor:default}
 `;

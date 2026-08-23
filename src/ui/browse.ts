@@ -112,7 +112,9 @@ function detail(id, card) {
           w.textContent = bits.join(' \u00b7 ');
         }
         if (d.chapters === null || d.chapters === undefined) { n.textContent = '?'; return; }
-        n.textContent = d.chapters + ' ch';
+        // Unique chapters, and say so when the source has each one several times over.
+        n.textContent = d.chapters + ' ch' + (d.total > d.chapters * 1.15 ? ' of ' + d.total : '');
+        if (d.total > d.chapters * 1.15) n.title = d.total + ' uploads for ' + d.chapters + ' chapters';
         n.className = 'ch ' + (d.chapters === 0 ? 'bad' : d.chapters < 3 ? 'warn' : 'rec');
         if (d.chapters === 0) { const b = c.querySelector('button'); if (b) { b.disabled = true; b.textContent = 'empty'; } }
       }).catch(()=>{}).finally(()=>{ active--; pump(); });

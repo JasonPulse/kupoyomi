@@ -58,16 +58,26 @@ export async function streamSearch(res: ServerResponse, query: string, concurren
  * chapters is worse than useless and the count is the only way to know.
  */
 export async function mangaDetail(mangaId: number): Promise<{
-  chapters: number; description: string | null; status: string; genres: string[]; lastUpload: string | null;
+  chapters: number; total: number; highest: number | null;
+  description: string | null; status: string; genres: string[]; lastUpload: string | null;
 }> {
   await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
     { id: mangaId }).catch(() => undefined);
   const d = await gql<{ manga: { description: string | null; status: string; genre: string[];
-    chapters: { totalCount: number; nodes: Array<{ uploadDate: string | null }> } } }>(
-    `{ manga(id:${mangaId}) { description status genre chapters { totalCount nodes { uploadDate } } } }`);
+    chapters: { totalCount: number; nodes: Array<{ uploadDate: string | null; chapterNumber: number | null }> } } }>(
+    `{ manga(id:${mangaId}) { description status genre chapters { totalCount nodes { uploadDate chapterNumber } } } }`);
   const dates = d.manga.chapters.nodes.map((c) => c.uploadDate).filter((x): x is string => !!x).map(Number);
+  const nums = d.manga.chapters.nodes.map((c) => c.chapterNumber)
+    .filter((n): n is number => n !== null && n >= 0);
+  const unique = new Set(nums);
   return {
-    chapters: d.manga.chapters.totalCount,
+    // The distinct chapter numbers, not the row count. ComicK reported 319 chapters for
+    // a series that stops at 93: every chapter is uploaded several times over, once per
+    // language and group. A raw count makes the worst entry on the page look the best,
+    // and it is the number a person uses to choose.
+    chapters: unique.size > 0 ? unique.size : d.manga.chapters.totalCount,
+    total: d.manga.chapters.totalCount,
+    highest: nums.length > 0 ? Math.max(...nums) : null,
     description: d.manga.description,
     status: d.manga.status,
     genres: d.manga.genre ?? [],

@@ -88,9 +88,7 @@ export async function seriesPage(id: number): Promise<string> {
              <th title="chapters you hold that this source does not carry -- you keep the files">not carried</th><th></th></tr>
          ${bindRows || `<tr><td colspan="6" class="bad">no source bound${s.muted
            ? " (archived, which is deliberate: nothing will look for new chapters)"
-           : ' &mdash; nothing will ever look for new chapters. '
-             + `<a href="/search?q=${encodeURIComponent(s.title)}" style="text-decoration:none">`
-             + '<button type="button">choose a source</button></a>'
+           : " &mdash; nothing will ever look for new chapters"
          }</td></tr>`}</table>
        <div class="actions">
          <a href="/search?q=${encodeURIComponent(s.title)}" style="text-decoration:none">

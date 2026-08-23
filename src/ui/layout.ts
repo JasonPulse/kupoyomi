@@ -46,7 +46,8 @@ tr:hover td{background:rgba(0,0,0,.05)}
 .actions{margin-top:10px;padding-top:9px;border-top:1px solid rgba(0,0,0,.14);display:flex;gap:8px;align-items:center}
 .actions .hint{color:#6b5f4c;font-size:11px}
 button{background:#5d8a4a;border:1px solid #476b38;color:#f2f6ee;font-weight:600;
-  padding:4px 10px;border-radius:4px;cursor:pointer;font-size:13px}
+  padding:4px 10px;border-radius:4px;cursor:pointer;font-size:13px;
+  white-space:nowrap;flex:0 0 auto}
 button.weak{background:#cdc3ab;border-color:#a99d84;color:#3a3025}
 button:hover{filter:brightness(1.08)}
 button[disabled]{opacity:.45;cursor:default}

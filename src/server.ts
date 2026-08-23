@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { db } from "./db.js";
+import { db, migrate } from "./db.js";
 import { installedExtensions, installExtension, serverAbout, fetchExtensionIndex } from "./suwayomi.js";
 import { reviewPage, handleConfirmPost, handleArchivePost } from "./web.js";
 import { libraryPage } from "./ui/library.js";
@@ -111,6 +111,12 @@ const stats = async (): Promise<Record<string, unknown>> => {
 
 export async function serve(): Promise<void> {
   const port = Number(process.env["PORT"] ?? 8080);
+
+  // Migrations run here, not only from the CLI. A new table shipped in an image whose
+  // schema was never applied fails at the first query, and the failure surfaces wherever
+  // that query happens to live rather than at startup. Already-applied files are skipped,
+  // so this is a no-op on every boot after the first.
+  await migrate();
 
   // Deliberately not awaited: the health endpoint has to come up regardless of
   // whether Suwayomi is answering yet, or the probe cannot tell "still booting"

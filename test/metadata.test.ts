@@ -579,3 +579,50 @@ test("a folder with no series becomes one, with no source", { skip: !haveDb }, a
 
   await p.query("DELETE FROM series WHERE id = $1", [id]);
 });
+
+/**
+ * What "recently updated" is ordered by.
+ *
+ * It was ordered by the newest upstream upload date, so the same two titles sat at the top
+ * of Paperback's home screen for days while thirteen series and eight hundred chapters
+ * were added underneath them. An adopted chapter published in 2021 is new to this library
+ * today, and the reader wants to know what changed here.
+ */
+test("recently updated is ordered by when the library gained a chapter", { skip: !haveDb }, async () => {
+  const { listSeries } = await import("../src/pbapi.js");
+  const p = db();
+  const OLD = "Order Test Old Upstream", NEW = "Order Test New Upstream";
+  for (const t of [OLD, NEW]) await p.query("DELETE FROM series WHERE title = $1", [t]);
+
+  const mk = async (title: string, uploaded: string, added: string): Promise<number> => {
+    const r = await p.query<{ id: number }>(
+      "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [title]);
+    const id = r.rows[0]!.id;
+    await p.query(
+      `INSERT INTO chapter (series_id, chapter_number, file_path, uploaded_at, added_at)
+       VALUES ($1,1,$2,$3,$4)`, [id, `/nowhere/${id}.cbz`, uploaded, added]);
+    return id;
+  };
+  // Published years ago, adopted a minute ago: this is a manual download being imported.
+  const oldUpstream = await mk(OLD, "2021-01-01", new Date(Date.now() - 60_000).toISOString());
+  // Published yesterday, but this library has had it for a month.
+  const newUpstream = await mk(NEW, new Date(Date.now() - 86_400_000).toISOString(),
+    new Date(Date.now() - 30 * 86_400_000).toISOString());
+
+  const list = await listSeries();
+  // Keyed as strings: series.id is a bigint, so pg hands it back as a string on both
+  // sides and a Map of numbers silently misses every lookup.
+  const positions = new Map(list.map((s, i) => [String(s.id), i]));
+  const at = (id: number | string): number => {
+    const n = positions.get(String(id));
+    assert.ok(n !== undefined, `series ${id} is missing from the list entirely`);
+    return n!;
+  };
+  assert.ok(at(oldUpstream) < at(newUpstream),
+    "the series this library just gained comes first, even though its chapter is four years older");
+
+  const mine = list.find((s) => String(s.id) === String(oldUpstream))!;
+  assert.ok(mine.lastAdded, "and the timestamp is exposed, so the order can be checked rather than trusted");
+
+  for (const t of [OLD, NEW]) await p.query("DELETE FROM series WHERE title = $1", [t]);
+});

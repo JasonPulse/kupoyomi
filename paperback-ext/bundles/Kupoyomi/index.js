@@ -474,7 +474,7 @@ const types_1 = require("@paperback/types");
  * of the server and is worth preserving in the client.
  */
 exports.KupoyomiInfo = {
-    version: "1.1.0",
+    version: "1.2.0",
     name: "Kupoyomi",
     icon: "icon.png",
     author: "Jason Clift",
@@ -614,18 +614,36 @@ class Kupoyomi {
         const slice = ordered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
         const base = await this.baseUrl();
         return App.createPagedResults({
-            results: slice.map((s) => this.tile(s, base)),
+            results: slice.map((s) => this.tile(s, base, homepageSectionId === "recent")),
             // Undefined metadata is how the app is told to stop asking. Returning a page
             // number past the end instead makes it loop on an empty response forever.
             metadata: (page + 1) * PAGE_SIZE < ordered.length ? { page: page + 1 } : undefined,
         });
     }
-    tile(s, base) {
+    /** "3h ago", "2d ago". Short enough for a tile subtitle. */
+    static since(iso) {
+        if (!iso)
+            return "";
+        const ms = Date.now() - Date.parse(iso);
+        if (!Number.isFinite(ms) || ms < 0)
+            return "";
+        const h = Math.floor(ms / 3600000);
+        if (h < 1)
+            return "just now";
+        if (h < 24)
+            return `${h}h ago`;
+        const d = Math.floor(h / 24);
+        return d < 30 ? `${d}d ago` : `${Math.floor(d / 30)}mo ago`;
+    }
+    tile(s, base, withWhen = false) {
+        const when = withWhen ? Kupoyomi.since(s.lastAdded) : "";
         return App.createPartialSourceManga({
             mangaId: s.id,
             title: s.title,
             image: s.cover ? `${base}${s.cover}` : "",
-            subtitle: `${s.chapters} chapter${s.chapters === 1 ? "" : "s"}`,
+            // The date is the point of the recently-updated row: without it there is no way to
+            // tell whether the order means anything.
+            subtitle: when ? `${when} \u00b7 ${s.chapters} ch` : `${s.chapters} chapter${s.chapters === 1 ? "" : "s"}`,
         });
     }
     async getHomePageSections(sectionCallback) {
@@ -636,7 +654,9 @@ class Kupoyomi {
         sectionCallback(recent);
         const series = await this.getJson("/api/pb/series");
         const base = await this.baseUrl();
-        recent.items = series.slice(0, 24).map((s) => this.tile(s, base));
+        // The server returns them newest-first by when this library gained a chapter, so no
+        // sorting here: doing it again in the client is how the two drift apart.
+        recent.items = series.slice(0, 24).map((s) => this.tile(s, base, true));
         sectionCallback(recent);
         const all = App.createHomeSection({
             id: "all", title: "Everything", containsMoreItems: true, type: types_1.HomeSectionType.singleRowNormal,

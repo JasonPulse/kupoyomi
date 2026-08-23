@@ -17,7 +17,7 @@ import {
  * of the server and is worth preserving in the client.
  */
 export const KupoyomiInfo: SourceInfo = {
-  version: "1.1.0",
+  version: "1.2.0",
   name: "Kupoyomi",
   icon: "icon.png",
   author: "Jason Clift",
@@ -36,6 +36,8 @@ export const KupoyomiInfo: SourceInfo = {
 type PbSeries = {
   id: string; title: string; description: string | null; status: string;
   cover: string | null; chapters: number; lastUpload: string | null;
+  /** When the library last gained a chapter. What "recently updated" is ordered by. */
+  lastAdded: string | null;
 };
 type PbChapter = {
   id: string; number: number; pages: number | null;
@@ -181,19 +183,34 @@ export class Kupoyomi implements ChapterProviding, SearchResultsProviding,
     const slice = ordered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
     const base = await this.baseUrl();
     return App.createPagedResults({
-      results: slice.map((s) => this.tile(s, base)),
+      results: slice.map((s) => this.tile(s, base, homepageSectionId === "recent")),
       // Undefined metadata is how the app is told to stop asking. Returning a page
       // number past the end instead makes it loop on an empty response forever.
       metadata: (page + 1) * PAGE_SIZE < ordered.length ? { page: page + 1 } : undefined,
     });
   }
 
-  private tile(s: PbSeries, base: string): ReturnType<typeof App.createPartialSourceManga> {
+  /** "3h ago", "2d ago". Short enough for a tile subtitle. */
+  private static since(iso: string | null): string {
+    if (!iso) return "";
+    const ms = Date.now() - Date.parse(iso);
+    if (!Number.isFinite(ms) || ms < 0) return "";
+    const h = Math.floor(ms / 3_600_000);
+    if (h < 1) return "just now";
+    if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24);
+    return d < 30 ? `${d}d ago` : `${Math.floor(d / 30)}mo ago`;
+  }
+
+  private tile(s: PbSeries, base: string, withWhen = false): ReturnType<typeof App.createPartialSourceManga> {
+    const when = withWhen ? Kupoyomi.since(s.lastAdded) : "";
     return App.createPartialSourceManga({
       mangaId: s.id,
       title: s.title,
       image: s.cover ? `${base}${s.cover}` : "",
-      subtitle: `${s.chapters} chapter${s.chapters === 1 ? "" : "s"}`,
+      // The date is the point of the recently-updated row: without it there is no way to
+      // tell whether the order means anything.
+      subtitle: when ? `${when} \u00b7 ${s.chapters} ch` : `${s.chapters} chapter${s.chapters === 1 ? "" : "s"}`,
     });
   }
 
@@ -207,7 +224,9 @@ export class Kupoyomi implements ChapterProviding, SearchResultsProviding,
     const series = await this.getJson<PbSeries[]>("/api/pb/series");
     const base = await this.baseUrl();
 
-    recent.items = series.slice(0, 24).map((s) => this.tile(s, base));
+    // The server returns them newest-first by when this library gained a chapter, so no
+    // sorting here: doing it again in the client is how the two drift apart.
+    recent.items = series.slice(0, 24).map((s) => this.tile(s, base, true));
     sectionCallback(recent);
 
     const all = App.createHomeSection({

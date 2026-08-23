@@ -12,6 +12,8 @@ import { listEntries, pageEntries, readEntry } from "./unzip.js";
 export type PbSeries = {
   id: string; title: string; description: string | null; status: string;
   cover: string | null; chapters: number; lastUpload: string | null;
+  /** When this library last gained a chapter for the series. */
+  lastAdded: string | null;
 };
 
 export const listSeries = async (q?: string): Promise<PbSeries[]> =>
@@ -19,11 +21,18 @@ export const listSeries = async (q?: string): Promise<PbSeries[]> =>
     `SELECT s.id::text AS id, s.title, s.description, s.status,
             CASE WHEN s.cover_path IS NOT NULL THEN '/api/pb/cover/' || s.id ELSE NULL END AS cover,
             count(c.chapter_number)::int AS chapters,
-            max(c.uploaded_at)::date::text AS "lastUpload"
+            max(c.uploaded_at)::date::text AS "lastUpload",
+            max(c.added_at)::text AS "lastAdded"
        FROM series s LEFT JOIN chapter c ON c.series_id = s.id
       ${q ? "WHERE s.title ILIKE $1" : ""}
       GROUP BY s.id HAVING count(c.chapter_number) > 0
-      ORDER BY max(c.uploaded_at) DESC NULLS LAST, s.title`,
+      -- When THIS library last gained a chapter, not when the source published one.
+      --
+      -- Ordering by uploaded_at meant "recently updated" showed whatever had the newest
+      -- upstream publication date, so the same two titles sat at the top for days while
+      -- thirteen series and eight hundred chapters were added underneath them. What the
+      -- reader wants is what changed here.
+      ORDER BY max(c.added_at) DESC NULLS LAST, s.title`,
     q ? [`%${q}%`] : [])).rows;
 
 export const getSeries = async (id: number): Promise<PbSeries | null> =>
@@ -31,7 +40,8 @@ export const getSeries = async (id: number): Promise<PbSeries | null> =>
     `SELECT s.id::text AS id, s.title, s.description, s.status,
             CASE WHEN s.cover_path IS NOT NULL THEN '/api/pb/cover/' || s.id ELSE NULL END AS cover,
             count(c.chapter_number)::int AS chapters,
-            max(c.uploaded_at)::date::text AS "lastUpload"
+            max(c.uploaded_at)::date::text AS "lastUpload",
+            max(c.added_at)::text AS "lastAdded"
        FROM series s LEFT JOIN chapter c ON c.series_id = s.id
       WHERE s.id = $1 GROUP BY s.id`, [id])).rows[0] ?? null;
 

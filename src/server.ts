@@ -279,7 +279,11 @@ export async function serve(): Promise<void> {
 
     if (req.method === "GET") {
       if (path === "/") return html(libraryPage(url.searchParams.get("q") ?? undefined, url.searchParams.get("view") ?? "grid"));
-      if (path === "/search") return html(searchPage(url.searchParams.get("q") ?? undefined));
+      if (path === "/search") {
+        const sid = Number(url.searchParams.get("series"));
+        return html(searchPage(url.searchParams.get("q") ?? undefined,
+          Number.isInteger(sid) && sid > 0 ? sid : undefined));
+      }
       if (path === "/api/search") {
         streamSearch(res, url.searchParams.get("q") ?? "").catch(() => res.end());
         return;
@@ -354,9 +358,11 @@ export async function serve(): Promise<void> {
         const body = await readBody(req);
         const form = new URLSearchParams(body);
         if (path === "/add") {
+          const bindTo = Number(form.get("seriesId"));
           const id = await addSeries({
             title: form.get("title") ?? "", sourceId: form.get("sourceId") ?? "",
             sourceName: form.get("sourceName") ?? "", url: form.get("url") ?? "",
+            ...(Number.isInteger(bindTo) && bindTo > 0 ? { seriesId: bindTo } : {}),
           });
           // Queue what the source has and fetch the cover, but do not make the caller
           // wait: adding from a search should be instant so several can be added in a row.

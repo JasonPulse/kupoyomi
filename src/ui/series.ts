@@ -91,7 +91,7 @@ export async function seriesPage(id: number): Promise<string> {
            : " &mdash; nothing will ever look for new chapters"
          }</td></tr>`}</table>
        <div class="actions">
-         <a href="/search?q=${encodeURIComponent(s.title)}" style="text-decoration:none">
+         <a href="/search?q=${encodeURIComponent(s.title)}&series=${id}" style="text-decoration:none">
            <button type="button" class="${bindings.length === 0 ? "" : "weak"}">${
              bindings.length === 0 ? "choose a source" : "migrate to another source"}</button></a>
          <span class="hint">Searches every source for this title. Adding one attaches it to this series

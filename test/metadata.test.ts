@@ -263,3 +263,67 @@ test("adding a series from a paid source is refused", { skip: !haveDb }, async (
     "SELECT count(*) n FROM series WHERE title = $1", ["Paid Test Series"])).rows[0];
   assert.equal(Number(left?.n), 0, "and no series row is left behind");
 });
+
+/**
+ * Adding a source to a work already in the library.
+ *
+ * The search card groups every listing of one work together and badges it "in library",
+ * but the add form used to post only the source's title. canonical() keeps case and
+ * brackets, so "Kill The Villainess" and "Kill the Villainess (Comic)" each produced a
+ * folder of their own and each became a SECOND series for a work already held. That is
+ * how To You, Noble and Vulgar ended up beside Noble in Name, Vulgar at Heart, one
+ * holding 1-44 and the other 45-50, each queued to download what the other had.
+ */
+test("a source added to a series in the library attaches instead of duplicating", { skip: !haveDb }, async () => {
+  const { addSeries } = await import("../src/ui/search.js");
+  const p = db();
+  const TITLE = "Attach Test Series";
+  await p.query("DELETE FROM series WHERE title ILIKE $1 OR folder ILIKE $1", [`${TITLE}%`]);
+  const s = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [TITLE]);
+  const id = s.rows[0]!.id;
+  await p.query(
+    `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
+     VALUES ($1,'a','First Source',0,'primary')`, [id]);
+
+  // The three shapes that each used to create their own series.
+  for (const [i, variant] of ["ATTACH TEST SERIES", `${TITLE} (Comic)`, `${TITLE} [Official]`].entries()) {
+    const got = await addSeries({
+      title: variant, sourceId: `s${i}`, sourceName: `Source ${i}`, url: `/u${i}`, seriesId: id,
+    });
+    assert.equal(got, id, `${variant} must attach to the series it was chosen for`);
+  }
+
+  const count = (await p.query<{ n: string }>(
+    "SELECT count(*) n FROM series WHERE folder ILIKE $1", [`${TITLE}%`])).rows[0];
+  assert.equal(Number(count?.n), 1, "still exactly one series, not four");
+
+  const roles = (await p.query<{ role: string; source_name: string }>(
+    "SELECT role, source_name FROM series_binding WHERE series_id = $1 ORDER BY source_name", [id])).rows;
+  assert.equal(roles.length, 4, "one primary and three supplemental");
+  assert.equal(roles.filter((r) => r.role === "primary").length, 1,
+    "the incumbent stays primary: attaching a source must not silently switch the binding");
+
+  await p.query("DELETE FROM series WHERE id = $1", [id]);
+});
+
+test("without a series id, a title differing only in case still attaches", { skip: !haveDb }, async () => {
+  const { addSeries } = await import("../src/ui/search.js");
+  const p = db();
+  const TITLE = "Case Fallback Series";
+  await p.query("DELETE FROM series WHERE folder ILIKE $1", [`${TITLE}%`]);
+  const s = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [TITLE]);
+  const id = s.rows[0]!.id;
+
+  // Browse has no series id to pass, so the folder match is the only defence there.
+  const got = await addSeries({
+    title: "CASE fallback SERIES", sourceId: "z", sourceName: "Some Source", url: "/z",
+  });
+  assert.equal(got, id, "a capital letter is not a different work");
+
+  const count = (await p.query<{ n: string }>(
+    "SELECT count(*) n FROM series WHERE folder ILIKE $1", [`${TITLE}%`])).rows[0];
+  assert.equal(Number(count?.n), 1);
+  await p.query("DELETE FROM series WHERE id = $1", [id]);
+});

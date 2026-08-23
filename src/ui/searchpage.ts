@@ -126,7 +126,11 @@ function render(g) {
             '<input type="hidden" name="sourceId" value="'+r.sourceId+'">' +
             '<input type="hidden" name="sourceName" value="'+r.sourceName.replace(/"/g,'&quot;')+'">' +
             '<input type="hidden" name="url" value="'+r.url.replace(/"/g,'&quot;')+'">' +
-            '<button type="submit"'+(known?'':' disabled')+'>add</button></form>') +
+            // The series this belongs to, when it is one already held. Without it the
+            // server has only the source's title to go on, and a capital letter or a
+            // bracket is enough to make it a second series instead of another source.
+            (g.have ? '<input type="hidden" name="seriesId" value="'+g.have+'">' : '') +
+            '<button type="submit"'+(known?'':' disabled')+'>'+(g.have?'use this':'add')+'</button></form>') +
         '</td></tr>';
     }).join('') + '</table>';
 }
@@ -160,12 +164,14 @@ document.addEventListener('submit', ev => {
   if (!f.classList || !f.classList.contains('addf')) return;
   ev.preventDefault();
   const b = f.querySelector('button');
-  b.disabled = true; b.textContent = 'adding';
+  const attaching = !!f.querySelector('input[name=seriesId]');
+  b.disabled = true; b.textContent = attaching ? 'attaching' : 'adding';
   fetch('/add', { method: 'POST', body: new URLSearchParams(new FormData(f)) })
     .then(r => {
       const id = (r.url.split('/series/')[1] || '').split(/[^0-9]/)[0];
       f.outerHTML = id
-        ? '<span class="rec">added</span> <a class="series" href="/series/'+id+'">open</a>'
+        ? '<span class="rec">'+(attaching ? 'attached' : 'added')+
+          '</span> <a class="series" href="/series/'+id+'">open</a>'
         : '<span class="bad">failed</span>';
     })
     .catch(() => { b.disabled = false; b.textContent = 'retry'; });
@@ -205,11 +211,13 @@ es.addEventListener('hit', e => {
   const h = JSON.parse(e.data);
   const key = mergeKey(workKey(h.title));
   let g = groups.get(key);
-  if (!g) { g = { key, title: h.title, thumb: h.thumb, rows: [], have: window.HAVE[norm(h.title)] }; groups.set(key, g); }
+  // window.TARGET wins over a title match: the page was opened to find a source for that
+  // series, so that is what every row on it attaches to.
+  if (!g) { g = { key, title: h.title, thumb: h.thumb, rows: [], have: window.TARGET || window.HAVE[norm(h.title)] }; groups.set(key, g); }
   if (!g.thumb && h.thumb) g.thumb = h.thumb;
   // The plainest title represents the work; the tagged ones are its releases.
   if (h.title.length < g.title.length) g.title = h.title;
-  if (!g.have) g.have = window.HAVE[norm(h.title)];
+  if (!g.have) g.have = window.TARGET || window.HAVE[norm(h.title)];
   h.variant = variantOf(h.title);
   g.rows.push(h);
   seen++;
@@ -246,17 +254,39 @@ td.act form{display:inline-block;margin-left:6px}
 button[disabled]{opacity:.4;cursor:default}
 `;
 
-export async function searchPage(query?: string): Promise<string> {
+export async function searchPage(query?: string, seriesId?: number): Promise<string> {
   const have = Object.fromEntries((await db().query<{ id: number; title: string }>(
     "SELECT id, title FROM series")).rows.map((r) =>
       [r.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(), r.id]));
 
+  // Choosing a source FOR a series, rather than searching for something new.
+  //
+  // Matching a source's title against the library cannot close the duplicate hole. The
+  // library holds "To You, Noble and Vulgar" and the same work is listed elsewhere as
+  // "Noble in Name, Vulgar at Heart": no amount of normalising connects those, so an add
+  // creates a second series holding 45-50 beside one holding 1-44, each queued to
+  // download what the other already has. That is the exact failure this project exists
+  // to prevent, and it survived here because search had to guess.
+  //
+  // Arriving from a series page carries the answer instead of guessing at it. Every add
+  // on the page attaches to that series whatever the source calls it.
+  const target = seriesId
+    ? (await db().query<{ id: number; title: string; held: string }>(
+        `SELECT s.id, s.title, (SELECT count(*) FROM chapter c WHERE c.series_id = s.id)::text AS held
+           FROM series s WHERE s.id = $1`, [seriesId])).rows[0]
+    : undefined;
+
   const form = `<div class="card">
     <form method="get" action="/search">
       <input type="search" name="q" placeholder="search every source" value="${esc(query ?? "")}" autofocus>
+      ${target ? `<input type="hidden" name="series" value="${target.id}">` : ""}
       <button type="submit">search</button>
       <span class="dim" id="status" style="margin-left:12px">${query ? "starting" : ""}</span>
-    </form></div>`;
+    </form>${target ? `<div class="meta" style="margin-top:9px">Choosing a source for
+      <a class="series" href="/series/${target.id}">${esc(target.title)}</a>, which holds
+      <b>${target.held}</b> chapters. Anything you pick here attaches to it as another source
+      rather than becoming a second series, whatever that source calls it.</div>` : ""}
+    </div>`;
 
   if (!query) {
     return page("search", "global search", `<style>${EXTRA_CSS}</style>` + form +
@@ -265,8 +295,8 @@ export async function searchPage(query?: string): Promise<string> {
        before you pick it.</div>`);
   }
 
-  return page("search", "global search",
+  return page("search", target ? `choosing a source for ${target.title}` : "global search",
     `<style>${EXTRA_CSS}</style>${form}<div id="results"></div>
-     <script>window.HAVE=${JSON.stringify(have)};</script>
+     <script>window.HAVE=${JSON.stringify(have)};window.TARGET=${target ? target.id : "null"};</script>
      <script>${CLIENT}</script>`);
 }

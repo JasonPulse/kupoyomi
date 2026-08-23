@@ -95,7 +95,12 @@ export async function searchPage(query?: string): Promise<string> {
 }
 
 /** Creates the series and its primary binding, then queues whatever the source has. */
-export async function addSeries(v: { title: string; sourceId: string; sourceName: string; url: string }): Promise<number> {
+export async function addSeries(v: {
+  title: string; sourceId: string; sourceName: string; url: string;
+  /** The series this source belongs to. Given when the caller already knows, which is
+   *  the only reliable way to attach rather than duplicate. */
+  seriesId?: number;
+}): Promise<number> {
   // The last gate. A paid source is filtered out of search and browse, but a stale page
   // or a hand-built request could still post one, and binding to it is the mistake worth
   // preventing: its chapters download as a purchase notice and the ledger then treats
@@ -107,11 +112,34 @@ export async function addSeries(v: { title: string; sourceId: string; sourceName
   const client = await p.connect();
   try {
     await client.query("BEGIN");
-    const s = await client.query<{ id: number }>(
-      `INSERT INTO series (title, folder) VALUES ($1,$2)
-       ON CONFLICT (folder) DO UPDATE SET title = EXCLUDED.title RETURNING id`,
-      [v.title, canonical(v.title)]);
-    const id = s.rows[0]!.id;
+    // An explicit series wins. Deriving one from the source's title is how duplicates
+    // happen: canonical() keeps case and brackets, so "Kill The Villainess" and "Kill
+    // the Villainess (Comic)" each produce a folder of their own and each becomes a
+    // second series for a work already held. That is how To You, Noble and Vulgar ended
+    // up alongside Noble in Name, Vulgar at Heart, one holding 1-44 and the other 45-50,
+    // each queued to download what the other already had.
+    let id: number;
+    if (v.seriesId) {
+      const found = await client.query<{ id: number }>(
+        "SELECT id FROM series WHERE id = $1", [v.seriesId]);
+      if (found.rowCount === 0) throw new Error(`no series ${v.seriesId}`);
+      id = found.rows[0]!.id;
+    } else {
+      // No series given, so fall back to the folder -- but match it case-insensitively,
+      // because a title differing only in capitals is the same work every time.
+      const folder = canonical(v.title);
+      const near = await client.query<{ id: number }>(
+        "SELECT id FROM series WHERE lower(folder) = lower($1)", [folder]);
+      if (near.rowCount && near.rows[0]) {
+        id = near.rows[0].id;
+      } else {
+        const s = await client.query<{ id: number }>(
+          `INSERT INTO series (title, folder) VALUES ($1,$2)
+           ON CONFLICT (folder) DO UPDATE SET title = EXCLUDED.title RETURNING id`,
+          [v.title, folder]);
+        id = s.rows[0]!.id;
+      }
+    }
     const existing = (await client.query<{ id: number }>(
       "SELECT id FROM series_binding WHERE series_id = $1 AND role = 'primary'", [id])).rows[0];
     await client.query(

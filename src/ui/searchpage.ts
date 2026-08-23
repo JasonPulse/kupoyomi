@@ -11,15 +11,28 @@ const status = document.getElementById('status');
 // '[Circle] Title [Korean] [x]' are one work listed four times. Alternative titles after
 // a pipe are dropped for the same reason.
 const norm = s => s.toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-const workKey = s => norm(String(s).split('|')[0].replace(/[\[({][^\])}]*[\])}]/g,' '))
-  .replace(/[^a-z0-9]/g,'');
+const workKey = s => {
+  const base = String(s).split('|')[0];
+  const runs = (base.match(/[\[(][^\])]+[\])]/g) || [])
+    .map(t => t.slice(1, -1).trim()).filter(t => RUN_TAG.test(t));
+  return norm(base.replace(/[\[({][^\])}]*[\])}]/g,' ')).replace(/[^a-z0-9]/g,'')
+    + (runs.length ? norm(runs.join('')).replace(/[^a-z0-9]/g,'') : '');
+};
 // What distinguishes one listing from another within a work: exactly those bracketed
 // tags, minus the circle name that every variant shares.
 const variantOf = s => {
-  const tags = (String(s).match(/\[[^\]]+\]/g) || []).slice(1)
-    .filter(t => !/^\[digital\]$/i.test(t));
-  return tags.join(' ');
+  // Every tag, and parentheses as well as brackets. It used to slice off the first tag,
+  // so "Kill the Villainess [Official]" and "Kill The Villainess [S3]" both reported no
+  // release at all and looked like duplicate rows of one thing.
+  const tags = (String(s).match(/[\[(][^\])]+[\])]/g) || [])
+    .map(t => t.slice(1, -1).trim())
+    .filter(t => t && !/^digital$/i.test(t));
+  return tags.join(' \u00b7 ');
 };
+// A season or part marker is a different run of chapters, not a different edition of the
+// same one, so it stays in the grouping key. Everything else in brackets is a language,
+// a scanlator or an edition label and is stripped.
+const RUN_TAG = /^(?:s|season|part|pt|vol|volume|book|arc)\s*\.?\s*\d+$|^\d+(?:st|nd|rd|th)\s+(?:season|part)$/i;
 const detailQueue = [];
 let active = 0;
 
@@ -34,6 +47,11 @@ function render(g) {
   // Most chapters first, then prefer an English release over a translated one.
   const en = r => /english/i.test(r.variant||'') ? 0 : 1;
   const best = [...g.rows].sort((a,b)=>(b.chapters??-1)-(a.chapters??-1) || en(a)-en(b));
+  // The median of what the group's sources report. ComicK listed 319 for a series every
+  // other source put at 128, because it counts every language at once. Silently mixing
+  // that in with the rest invites picking it as the fullest source.
+  const counts = g.rows.map(r => r.chapters).filter(n => typeof n === 'number' && n > 0).sort((a,b)=>a-b);
+  const median = counts.length >= 3 ? counts[Math.floor(counts.length/2)] : 0;
   const desc = g.description
     ? '<details class="dwrap"><summary class="desc">'+g.description+'</summary><div class="descfull">'+g.description+'</div></details>'
     : '';
@@ -51,10 +69,14 @@ function render(g) {
       const known = r.chapters !== undefined && r.chapters !== null;
       const empty = known && r.chapters === 0;   // one chapter is a real new series, zero is nothing
       const thin = known && r.chapters > 0 && r.chapters < 3;
+      const odd = median > 0 && known && r.chapters > 0
+        && (r.chapters > median * 1.6 || r.chapters < median * 0.5);
       return '<tr>' +
         '<td>'+r.sourceName+(r.nsfw?' <span class="dim">18+</span>':'')+'</td>' +
         '<td class="dim">'+(r.variant || '-')+'</td>' +
-        '<td class="'+(empty?'bad':thin?'warn':known?'rec':'dim')+'">'+(known ? r.chapters : '<span class="spin">checking</span>')+'</td>' +
+        '<td class="'+(empty?'bad':thin||odd?'warn':known?'rec':'dim')+'">'+(known ? r.chapters : '<span class="spin">checking</span>')+
+          (odd ? '<div class="dim" style="font-size:10.5px" title="the other sources report about '+median+
+                 ', so this is probably a different run, or every language counted together">unlike the rest</div>' : '')+'</td>' +
         '<td class="dim">'+(r.lastUpload || '-')+'</td>' +
         '<td class="act"><a class="series" style="margin-right:8px;font-size:11px" href="/preview?source='+
           encodeURIComponent(r.sourceId)+'&url='+encodeURIComponent(r.url)+'&title='+encodeURIComponent(r.title)+

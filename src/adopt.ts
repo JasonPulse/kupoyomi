@@ -348,3 +348,87 @@ export async function pruneRedundant(opts: { delete?: boolean } = {}): Promise<v
   console.log(`${opts.delete ? "freed" : "would free"} ${(freed / 1048576).toFixed(0)}MB across ${done.length} folders`);
   if (!opts.delete) console.log("pass --delete to remove them");
 }
+
+/**
+ * Links every undecided folder whose name is exactly a series' name, normalised.
+ *
+ * Most of the 66 undecided folders are the source folders these series were migrated
+ * from, so their names match a library title letter for letter once punctuation is
+ * dropped: "Tsukimichi_ Moonlit Fantasy" against "Tsukimichi: Moonlit Fantasy". An exact
+ * match on the whole name is a different proposition from a similarity score and can be
+ * acted on in bulk.
+ *
+ * Two names matching one folder is not a match: it means the library has two series
+ * called the same thing, and picking one would adopt somebody else's chapters. Those are
+ * left alone and reported.
+ */
+export async function linkObvious(opts: { dryRun?: boolean } = {}): Promise<void> {
+  const p = db();
+  const named = new Map<string, Array<{ id: number; title: string }>>();
+  for (const r of (await p.query<{ id: number; title: string; name: string }>(
+    `SELECT id, title, title AS name FROM series
+     UNION ALL SELECT s.id, s.title, a.alias AS name FROM series_alias a JOIN series s ON s.id = a.series_id`)).rows) {
+    const k = norm(r.name);
+    const l = named.get(k);
+    if (l) { if (!l.some((x) => x.id === r.id)) l.push({ id: r.id, title: r.title }); }
+    else named.set(k, [{ id: r.id, title: r.title }]);
+  }
+
+  const unclaimed = await unclaimedFolders();
+  const decided = new Set((await p.query<{ path: string }>(
+    "SELECT path FROM legacy_link")).rows.map((r) => r.path));
+
+  let linked = 0, ambiguous = 0, unmatched = 0;
+  for (const u of unclaimed) {
+    if (decided.has(u.path)) continue;
+    const hits = named.get(norm(u.folder));
+    if (!hits) { unmatched++; continue; }
+    if (hits.length > 1) {
+      ambiguous++;
+      console.log(`  ambiguous ${u.folder.slice(0, 54)}`);
+      console.log(`            matches ${hits.map((h) => `${h.id} ${h.title.slice(0, 30)}`).join(", ")} -- left alone`);
+      continue;
+    }
+    const s = hits[0]!;
+    console.log(`  ${opts.dryRun ? "would link" : "linked"} ${String(u.files).padStart(4)} files  ${u.folder.slice(0, 48)}  ->  ${s.id} ${s.title.slice(0, 34)}`);
+    if (!opts.dryRun) await setLink(s.id, u.path, "linked");
+    linked++;
+  }
+  console.log(`${opts.dryRun ? "would link" : "linked"} ${linked}, ${ambiguous} ambiguous, ${unmatched} with no series of that name`);
+  if (unmatched > 0) console.log(`the unmatched ones need a series: give one an "also known as", or import the folder as a new series`);
+}
+
+/**
+ * Makes a series out of a folder and adopts everything in it.
+ *
+ * For a manually downloaded folder with no series at all: Isekai Nonbiri Nouka and The
+ * New Gate are on disk and nothing in the library corresponds to them. Created without a
+ * source, deliberately, because a folder cannot say where new chapters should come from.
+ * It shows up as "no source" and the series page asks for one.
+ */
+export async function importFolder(path: string, title?: string): Promise<number> {
+  const p = db();
+  const folder = path.split("/").filter(Boolean).at(-1) ?? "";
+  // Underscores stand in for spaces and colons on disk, and a title is read by a person.
+  const name = (title ?? folder.replace(/_/g, " ").replace(/\s+/g, " ").trim());
+  if (!name) throw new Error("could not work out a title; pass one");
+  const { canonical } = await import("./seed.js");
+
+  const existing = (await p.query<{ id: number; title: string }>(
+    "SELECT id, title FROM series WHERE lower(folder) = lower($1)", [canonical(name)])).rows[0];
+  if (existing) {
+    console.log(`"${existing.title}" already exists as series ${existing.id}; linking the folder to it`);
+    await setLink(existing.id, path, "linked");
+    await adoptFromDisk(existing.id);
+    return existing.id;
+  }
+
+  const s = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$2) RETURNING id", [name, canonical(name)]);
+  const id = s.rows[0]!.id;
+  console.log(`created series ${id} "${name}" with no source`);
+  await setLink(id, path, "linked");
+  await adoptFromDisk(id);
+  console.log(`  it has no source, so nothing will look for new chapters until you choose one`);
+  return id;
+}

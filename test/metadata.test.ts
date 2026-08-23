@@ -506,3 +506,76 @@ test("space freed counts only files the library does not already own", { skip: !
 
   await p.query("DELETE FROM series WHERE id = $1", [sid]);
 });
+
+/**
+ * Bulk linking, which is only safe because it demands an exact name.
+ *
+ * Most of the 66 undecided folders are the source folders their series were migrated
+ * from, so their names match a library title letter for letter once punctuation is
+ * dropped. An exact match on the whole name can be acted on in bulk; a similarity score
+ * cannot, and two series sharing a name cannot be guessed between at all.
+ */
+test("bulk linking takes exact name matches and refuses ambiguous ones", { skip: !haveDb }, async () => {
+  const { linkObvious, findOnDisk } = await import("../src/adopt.js");
+  const { mkdirSync: mk, writeFileSync: wf } = await import("node:fs");
+  const p = db();
+  const EXACT = "Bulk Exact Series", TWIN = "Bulk Twin Series";
+  await p.query("DELETE FROM series WHERE title IN ($1,$2)", [EXACT, TWIN]);
+
+  const one = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [EXACT]);
+  const exactId = one.rows[0]!.id;
+  // Two series with the same title under different folders, which is a real state: the
+  // same work listed twice by different names on disk.
+  const twinA = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$2) RETURNING id", [TWIN, `${TWIN} A`]);
+  const twinB = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$2) RETURNING id", [TWIN, `${TWIN} B`]);
+
+  // Punctuation differs, which is exactly what a folder name does to a title.
+  const exactDir = join(legacyRoot, "Bulk Exact_ Series".replace("_", ""));
+  mk(exactDir, { recursive: true });
+  wf(join(exactDir, "Chapter 1.cbz"), Buffer.from("a"));
+  const twinDir = join(legacyRoot, TWIN);
+  mk(twinDir, { recursive: true });
+  wf(join(twinDir, "Chapter 1.cbz"), Buffer.from("b"));
+
+  await linkObvious();
+
+  assert.equal((await findOnDisk(exactId)).sources.length, 1,
+    "an exact name match is linked without being asked");
+  for (const t of [twinA, twinB]) {
+    assert.equal((await findOnDisk(t.rows[0]!.id)).sources.length, 0,
+      "two series of the same name must not be guessed between: picking one adopts the other's chapters");
+  }
+
+  await p.query("DELETE FROM series WHERE title IN ($1,$2)", [EXACT, TWIN]);
+});
+
+test("a folder with no series becomes one, with no source", { skip: !haveDb }, async () => {
+  const { importFolder } = await import("../src/adopt.js");
+  const { mkdirSync: mk, writeFileSync: wf } = await import("node:fs");
+  const p = db();
+  await p.query("DELETE FROM series WHERE title = $1", ["Isekai Import Test"]);
+
+  // Underscores where the spaces were, which is how these arrived on disk.
+  const dir = join(legacyRoot, "Isekai_Import_Test");
+  mk(dir, { recursive: true });
+  for (const n of [1, 2, 3]) wf(join(dir, `Chapter ${n}.cbz`), Buffer.from(`ch${n}`));
+
+  const id = await importFolder(dir);
+  const s = (await p.query<{ title: string; held: string; bindings: string }>(
+    `SELECT s.title, (SELECT count(*) FROM chapter c WHERE c.series_id=s.id)::text held,
+            (SELECT count(*) FROM series_binding b WHERE b.series_id=s.id)::text bindings
+       FROM series s WHERE s.id = $1`, [id])).rows[0]!;
+  assert.equal(s.title, "Isekai Import Test", "underscores become spaces in the title");
+  assert.equal(Number(s.held), 3, "everything in the folder is adopted");
+  assert.equal(Number(s.bindings), 0,
+    "and it has no source: a folder cannot say where new chapters come from");
+
+  // Running it again must attach rather than make a second series.
+  const again = await importFolder(dir);
+  assert.equal(again, id, "importing the same folder twice is not two series");
+
+  await p.query("DELETE FROM series WHERE id = $1", [id]);
+});

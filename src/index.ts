@@ -46,6 +46,8 @@ const usage = `kupoyomi <command>
   link <seriesId> <path> [--ignore]  record that a folder belongs to a series, or does not
   aka <seriesId> <name> [--remove]  another name the series goes by, used to match folders
   prune-folders [--delete]   linked folders whose every chapter is already in the library
+  link-obvious [--dry-run]   link every folder whose name is exactly a series' name
+  import-folder <path> [title]  make a series from a folder and adopt everything in it
   remove <seriesId> [--files] [--legacy]  delete a series; prints the plan without flags
   gaps <seriesId>            what is missing, and which sources carry it
   parse-check                how well chapter numbers can be read from filenames
@@ -190,6 +192,19 @@ const main = async (): Promise<void> => {
       if (process.argv.includes("--remove")) await removeAlias(sid, name);
       else await addAlias(sid, name);
       console.log((await aliasesFor(sid)).map((a) => `  ${a.alias}  (${a.origin})`).join("\n") || "  no other names");
+      break;
+    }
+    case "link-obvious": {
+      const { linkObvious } = await import("./adopt.js");
+      await linkObvious({ dryRun: process.argv.includes("--dry-run") });
+      break;
+    }
+    case "import-folder": {
+      const path = process.argv[3];
+      if (!path) throw new Error("usage: import-folder <path> [title]");
+      const { importFolder } = await import("./adopt.js");
+      const t = process.argv[4];
+      await importFolder(path, t && !t.startsWith("--") ? t : undefined);
       break;
     }
     case "prune-folders": {

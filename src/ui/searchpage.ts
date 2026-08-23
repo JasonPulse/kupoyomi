@@ -76,12 +76,18 @@ function render(g) {
       (g.thumb ? '<img class="cover" loading="lazy" src="'+g.thumb+'">' : '<div class="cover"></div>') +
       '<div class="srch-body"><div class="title">'+g.title+
         (g.have ? ' <a class="badge" href="/series/'+g.have+'">in library</a>' : '')+'</div>'+
+        (g.have && g.held ? '<div class="meta">you hold <b>'+g.held+'</b> chapters'+
+          (g.heldMax ? ', up to ch '+g.heldMax : '')+'</div>' : '')+
         '<div class="meta">'+best.length+' unique release'+(best.length===1?'':'s')+
           (g.rows.length !== best.length ? ' <span class="dim">('+g.rows.length+' listed in total)</span>' : '')+
           (g.genres && g.genres.length ? ' &middot; '+g.genres.slice(0,5).join(', ') : '')+'</div>'+
         desc+
       '</div></div>' +
-    '<table class="srcs"><tr><th>source</th><th>release</th><th>chapters</th><th>latest</th><th></th></tr>' +
+    '<table class="srcs"><tr><th>source</th><th>release</th><th>chapters</th>' +
+      (g.have ? '<th title="chapters past your highest -- the reason to switch">new</th>'
+              + '<th title="chapters inside your range that you do not have">fills</th>'
+              + '<th title="chapters you hold that this source does not carry. Costs nothing: the files stay">not carried</th>' : '') +
+      '<th>latest</th><th></th></tr>' +
     best.map(r => {
       const known = r.chapters !== undefined && r.chapters !== null;
       const empty = known && r.chapters === 0;   // one chapter is a real new series, zero is nothing
@@ -103,6 +109,13 @@ function render(g) {
           (padded ? '<div class="warn" style="font-size:10.5px">'+r.total+' uploads, so most chapters are here more than once</div>' : '')+
           (odd && !padded ? '<div class="warn" style="font-size:10.5px">most sources say about '+median+'</div>' : '')+
           '</td>' +
+        (g.have ? (function(){
+          const nb = r.newBeyond, fg = r.fillsGaps, nc = r.notCarried;
+          const cell = (v, cls) => '<td class="'+(v > 0 ? cls : 'dim')+'">'+
+            (v === undefined ? '<span class="dim">-</span>' : v > 0 ? '+'+v : '0')+'</td>';
+          return cell(nb, 'rec') + cell(fg, 'rec') +
+            '<td class="dim">'+(nc === undefined ? '-' : nc > 0 ? nc : '-')+'</td>';
+        })() : '') +
         '<td class="dim">'+(r.lastUpload || '-')+'</td>' +
         '<td class="act"><a href="/preview?source='+
           encodeURIComponent(r.sourceId)+'&url='+encodeURIComponent(r.url)+'&title='+encodeURIComponent(r.title)+
@@ -122,11 +135,20 @@ function pump() {
   while (active < 4 && detailQueue.length) {
     const { key, row } = detailQueue.shift();
     active++;
-    fetch('/api/detail?mangaId='+row.mangaId).then(r=>r.json()).then(d => {
+    // When the work is already in the library, ask for the comparison too: what this
+    // source offers past what is held, what holes it fills, what it does not carry.
+    // That is what choosing a source actually needs, and it is why the migration page
+    // existed at all.
+    const g0 = groups.get(key);
+    const url = '/api/detail?mangaId='+row.mangaId + (g0 && g0.have ? '&seriesId='+g0.have : '');
+    fetch(url).then(r=>r.json()).then(d => {
       row.chapters = d.chapters; row.lastUpload = d.lastUpload;
+      row.total = d.total; row.highest = d.highest;
+      row.newBeyond = d.newBeyond; row.fillsGaps = d.fillsGaps; row.notCarried = d.notCarried;
       const g = groups.get(key);
       if (g && !g.description && d.description) g.description = d.description;
       if (g && (!g.genres || !g.genres.length) && d.genres) g.genres = d.genres;
+      if (g && d.held !== undefined) { g.held = d.held; g.heldMax = d.heldMax; }
       render(g);
     }).catch(()=>{ row.chapters = null; }).finally(()=>{ active--; pump(); });
   }

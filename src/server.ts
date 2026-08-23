@@ -1,7 +1,6 @@
 import { createServer } from "node:http";
 import { db, migrate } from "./db.js";
 import { installedExtensions, installExtension, serverAbout, fetchExtensionIndex } from "./suwayomi.js";
-import { reviewPage, handleConfirmPost, handleArchivePost } from "./web.js";
 import { libraryPage } from "./ui/library.js";
 import { addSeries } from "./ui/search.js";
 import { searchPage } from "./ui/searchpage.js";
@@ -288,11 +287,13 @@ export async function serve(): Promise<void> {
       if (path === "/api/detail") {
         const id = Number(url.searchParams.get("mangaId"));
         if (!Number.isInteger(id)) return send(400, { error: "mangaId required" });
-        mangaDetail(id).then((d) => send(200, d))
+        // seriesId is optional: with it, the answer includes what this source offers
+        // against what that series already holds, which is what choosing a source needs.
+        const sid = Number(url.searchParams.get("seriesId"));
+        mangaDetail(id, Number.isInteger(sid) && sid > 0 ? sid : undefined).then((d) => send(200, d))
           .catch((e: unknown) => send(200, { chapters: null, error: e instanceof Error ? e.message : String(e) }));
         return;
       }
-      if (path === "/review") return html(reviewPage());
       if (path === "/queue") return html(queuePage());
       if (path === "/downloads") return html(downloadsPage());
       if (path === "/api/live") {
@@ -352,8 +353,6 @@ export async function serve(): Promise<void> {
       const act = async (): Promise<string> => {
         const body = await readBody(req);
         const form = new URLSearchParams(body);
-        if (path === "/confirm") return handleConfirmPost(body);
-        if (path === "/archive") return handleArchivePost(body);
         if (path === "/add") {
           const id = await addSeries({
             title: form.get("title") ?? "", sourceId: form.get("sourceId") ?? "",

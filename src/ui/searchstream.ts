@@ -57,9 +57,40 @@ export async function streamSearch(res: ServerResponse, query: string, concurren
  * chapters the source actually carries, plus a description. A source offering two
  * chapters is worse than useless and the count is the only way to know.
  */
-export async function mangaDetail(mangaId: number): Promise<{
+/**
+ * What a source offers measured against what a series already holds.
+ *
+ * This is the whole of what the migration page used to do, and the only reason that page
+ * existed. A raw chapter count cannot answer "should I move to this source": 129 means
+ * nothing without knowing that 15 of them are past your highest and 9 fill your holes.
+ *
+ * Three separate facts, never one score. Chapters past your highest are the reason to
+ * move; chapters inside your range that you lack are a bonus; chapters you hold that the
+ * source does not carry cost nothing at all, because the files stay on disk. Smearing
+ * them into a single number is what made the old library offer migrations that lost you
+ * chapters.
+ */
+async function against(seriesId: number, offered: number[]): Promise<{
+  newBeyond: number; fillsGaps: number; notCarried: number; held: number; heldMax: number | null;
+}> {
+  const { db } = await import("../db.js");
+  const held = new Set((await db().query<{ n: string }>(
+    "SELECT chapter_number AS n FROM chapter WHERE series_id = $1", [seriesId])).rows.map((r) => Number(r.n)));
+  const heldMax = held.size > 0 ? Math.max(...held) : null;
+  const offeredSet = new Set(offered);
+  return {
+    newBeyond: heldMax === null ? offered.length : offered.filter((n) => n > heldMax).length,
+    fillsGaps: heldMax === null ? 0 : offered.filter((n) => n <= heldMax && !held.has(n)).length,
+    notCarried: [...held].filter((n) => !offeredSet.has(n)).length,
+    held: held.size,
+    heldMax,
+  };
+}
+
+export async function mangaDetail(mangaId: number, seriesId?: number): Promise<{
   chapters: number; total: number; highest: number | null;
   description: string | null; status: string; genres: string[]; lastUpload: string | null;
+  newBeyond?: number; fillsGaps?: number; notCarried?: number; held?: number; heldMax?: number | null;
 }> {
   await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
     { id: mangaId }).catch(() => undefined);
@@ -70,6 +101,7 @@ export async function mangaDetail(mangaId: number): Promise<{
   const nums = d.manga.chapters.nodes.map((c) => c.chapterNumber)
     .filter((n): n is number => n !== null && n >= 0);
   const unique = new Set(nums);
+  const cmp = seriesId ? await against(seriesId, [...unique]) : undefined;
   return {
     // The distinct chapter numbers, not the row count. ComicK reported 319 chapters for
     // a series that stops at 93: every chapter is uploaded several times over, once per
@@ -82,5 +114,6 @@ export async function mangaDetail(mangaId: number): Promise<{
     status: d.manga.status,
     genres: d.manga.genre ?? [],
     lastUpload: dates.length > 0 ? new Date(Math.max(...dates)).toISOString().slice(0, 10) : null,
+    ...(cmp ?? {}),
   };
 }

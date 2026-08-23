@@ -89,7 +89,7 @@ a.series{color:#4a3a7a;text-decoration:none}a.series:hover{text-decoration:under
 .cover{background:#2a2a30}
 `;
 
-export type Nav = "library" | "browse" | "search" | "review" | "queue" | "downloads" | "extensions";
+export type Nav = "library" | "browse" | "search" | "queue" | "downloads" | "extensions";
 
 /** A parchment panel, for the primary content of a page. */
 export const news = (title: string, inner: string): string =>
@@ -109,7 +109,6 @@ export function page(active: Nav, subtitle: string, body: string): string {
   ${link("library", "/", "Library")}
   ${link("browse", "/browse", "Browse")}
   ${link("search", "/search", "Search")}
-  ${link("review", "/review", "Migrations")}
   ${link("downloads", "/downloads", "Downloading")}
   ${link("queue", "/queue", "Queue")}
   ${link("extensions", "/extensions", "Sources")}

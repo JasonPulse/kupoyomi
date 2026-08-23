@@ -9,11 +9,15 @@ belongs in `npm test`, not here.
 | Feature | Surface | File |
 | --- | --- | --- |
 | Library browsing | web, `/` | [library.md](library.md) |
-| Global search and adding | web, `/search` + SSE | [search.md](search.md) |
+| Global search, adding, migrating | web, `/search` + SSE | [search.md](search.md) |
 | Per-source browse with filters | web, `/browse` + SSE | [browse.md](browse.md) |
-| Migration review | web, `/review` | [migrations.md](migrations.md) |
 | Downloads and the scheduler | web, `/downloads` + CLI | [downloads.md](downloads.md) |
 | Reader API and extension repo | HTTP, `/api/pb/*`, `/paperback/` | [reader.md](reader.md) |
+
+`/review` is gone. It only ever showed the legacy import queue, which is empty and cannot
+refill: nothing but the one-time `import` command creates a candidate. Choosing a source
+for a library series lives in search now, where the comparison columns appear once the
+work is recognised as one you already hold.
 
 Not covered here, deliberately: `probe`, `confirm`, `remove`, `tidy`, `prune-candidates`
 and `add`. They mutate the owner's library or uninstall their sources. Prove those with a

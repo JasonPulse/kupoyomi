@@ -125,3 +125,18 @@ test("garbage is not mistaken for an image", () => {
   // A truncated JPEG must terminate rather than run off the end.
   assert.equal(imageSize(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04])), null);
 });
+
+// --- dates a source did not actually report ------------------------------------------
+test("a source reporting no upload date reads as unknown, not as 1970", () => {
+  const today = "2026-08-23";
+  // Zazamanga came back with the epoch and the page rendered "1970-01-21 (56.6y ago)",
+  // which looks like an answer and is not one. It also won a four-way tie for best
+  // source because nothing preferred a real date over a missing one.
+  assert.equal(ago("1970-01-21", today), "unknown");
+  assert.equal(ago("1970-01-01T00:00:00.000Z", today), "unknown");
+  assert.equal(ago(null, today), "-");
+  // Real dates still render, including old ones that are genuinely old.
+  assert.match(ago("2026-07-01", today), /^2026-07-01 \(/);
+  assert.match(ago("2021-12-25", today), /^2021-12-25 \(4\.7y ago\)$/);
+  assert.match(ago("1999-06-01", today), /^1999-06-01 \(/);
+});

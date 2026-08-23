@@ -76,6 +76,10 @@ export const fmt = (n: number | string | null): string => {
 export const ago = (date: string | null, today: string): string => {
   if (!date) return "-";
   const d = String(date).slice(0, 10);
+  // A source that reports no date gets a zero timestamp, which arrives here as 1970 and
+  // rendered as "1970-01-21 (56.6y ago)". That reads like a real answer and is not one:
+  // it means the source did not say. Anything before the sites existed is unknown.
+  if (d < "1995-01-01") return "unknown";
   const days = Math.round((Date.parse(today) - Date.parse(d)) / 86400000);
   if (!Number.isFinite(days)) return d;
   const rel = days < 1 ? "today" : days < 14 ? `${days}d ago`

@@ -88,13 +88,19 @@ export async function seriesPage(id: number): Promise<string> {
              <th title="chapters you hold that this source does not carry -- you keep the files">not carried</th><th></th></tr>
          ${bindRows || `<tr><td colspan="6" class="bad">no source bound${s.muted
            ? " (archived, which is deliberate: nothing will look for new chapters)"
-           : " -- nothing will ever look for new chapters. Migrate below to give it one."
+           : ' &mdash; nothing will ever look for new chapters. '
+             + `<a href="/search?q=${encodeURIComponent(s.title)}" style="text-decoration:none">`
+             + '<button type="button">choose a source</button></a>'
          }</td></tr>`}</table>
-       <div class="actions"><a class="series" href="/search?q=${encodeURIComponent(s.title)}">migrate: find another source</a>
-         <span class="hint">adding from search attaches the source to this series rather than making a
-           second one. It arrives as supplemental, and its real chapter count and range show up in the
-           table above so you can judge it before switching. Making it primary re-scans, and because
-           the ledger is keyed on chapter number, nothing already on disk is downloaded twice.</span></div>
+       <div class="actions">
+         <a href="/search?q=${encodeURIComponent(s.title)}" style="text-decoration:none">
+           <button type="button" class="${bindings.length === 0 ? "" : "weak"}">${
+             bindings.length === 0 ? "choose a source" : "migrate to another source"}</button></a>
+         <span class="hint">Searches every source for this title. Adding one attaches it to this series
+           rather than making a second one, and it arrives as supplemental so you can judge its real
+           chapter count and range in the table above before switching. Making it primary re-scans, and
+           because the ledger is keyed on chapter number, nothing already on disk is downloaded
+           twice.</span></div>
        <div class="actions">
          <form method="post" action="/series/${id}/scan"><button class="weak" type="submit">check for new chapters</button></form>
          <form method="post" action="/series/${id}/metadata"><button class="weak" type="submit">refresh cover &amp; synopsis</button></form>

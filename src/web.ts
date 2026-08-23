@@ -111,10 +111,20 @@ export async function reviewPage(): Promise<string> {
     // produced by it, so its numbering matches by construction. That is a restoration,
     // not a migration, and it should not be buried among the alternatives.
     const returned = usable.find((o) => o.source_name === k.dead_source);
+    // A source that reports no upload date at all comes back as the epoch. Four sources
+    // tied here on every number, and the winner was decided by whatever order the rows
+    // arrived in: it picked the one that could not say when it last published. Freshness
+    // breaks the tie, and no date loses to any date.
+    const freshness = (o: CmpRow): number => {
+      const d = o.last_upload ? String(o.last_upload).slice(0, 10) : "";
+      return !d || d < "1995-01-01" ? -1 : Date.parse(d);
+    };
     const best = returned ?? [...usable].sort((a, b) =>
       (b.new_beyond ?? 0) - (a.new_beyond ?? 0) ||
       (b.fills_gaps ?? 0) - (a.fills_gaps ?? 0) ||
-      (a.not_carried ?? 0) - (b.not_carried ?? 0))[0];
+      (a.not_carried ?? 0) - (b.not_carried ?? 0) ||
+      freshness(b) - freshness(a) ||
+      a.source_name.localeCompare(b.source_name))[0];
 
     // Same source can appear twice: sites carry duplicate entries for one series, so
     // the url is the only thing that tells them apart.
@@ -137,7 +147,11 @@ export async function reviewPage(): Promise<string> {
             <td class="${good ? "rec" : ""}">${esc(o.source_name)}${
               o.source_name === k.dead_source ? ' <span class="badge">original source, back</span>'
                 : o === best ? " &larr; best" : ""}${slug}</td>
-            <td>${fmt(o.range_lo)}&ndash;${fmt(o.range_hi)} <span class="dim">(${o.chapters})</span></td>
+            <td>${fmt(o.range_lo)}&ndash;${fmt(o.range_hi)} <span class="dim">(${o.chapters}${
+              // Without this, a source reaching chapter 71 with 30 holes in it looks
+              // better than one that stops at 42 and is complete. The range is not the
+              // measure; what it actually carries is.
+              (o.gaps ?? 0) > 0 ? `, ${o.gaps} missing` : ""})</span></td>
             <td class="${beyond > 0 ? "rec" : "dim"}"><b>${beyond > 0 ? `+${beyond}` : "0"}</b></td>
             <td class="${fills > 0 ? "rec" : "dim"}">${fills > 0 ? `+${fills}` : "0"}</td>
             <td class="dim">${absent > 0 ? absent : "-"}</td>

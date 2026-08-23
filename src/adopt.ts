@@ -71,6 +71,7 @@ export async function findOnDisk(seriesId: number, opts: { propose?: boolean } =
 
   const sources: AdoptSource[] = [];
   for (const d of await scanLegacyTree()) {
+    if (d.cbzCount === 0) continue;         // nothing to adopt from an empty folder
     const dirPath = d.sourceDir ? `${config.legacyRoot}/${d.sourceDir}/${d.folder}` : `${config.legacyRoot}/${d.folder}`;
     const state = decided.get(dirPath);
     if (state === "ignored") continue;
@@ -175,9 +176,12 @@ export async function diskReport(): Promise<void> {
   const byPath = new Map(links.map((l) => [l.path, l]));
   const series = (await p.query<{ id: number; title: string }>("SELECT id, title FROM series")).rows;
 
-  let linked = 0, ignored = 0, loose = 0;
+  let linked = 0, ignored = 0, loose = 0, empty = 0;
   const rows: string[] = [];
-  for (const d of tree.sort((a, b) => (a.sourceDir ?? "").localeCompare(b.sourceDir ?? "") || a.folder.localeCompare(b.folder))) {
+  for (const d of tree.sort((a, b) => b.cbzCount - a.cbzCount || a.folder.localeCompare(b.folder))) {
+    // A folder with no archive in it has nothing to adopt. Most of these are the source
+    // containers themselves and Suwayomi's thumbnail cache, which are not series at all.
+    if (d.cbzCount === 0) { empty++; continue; }
     const path = d.sourceDir ? `${config.legacyRoot}/${d.sourceDir}/${d.folder}` : `${config.legacyRoot}/${d.folder}`;
     const l = byPath.get(path);
     if (l?.state === "linked") { linked++; continue; }
@@ -188,7 +192,8 @@ export async function diskReport(): Promise<void> {
       + (guesses.length ? `\n           looks like: ${guesses.map((g) => `${g.id} ${g.title.slice(0, 44)}`).join("; ")}`
                         : `\n           no series matches by name -- link it by hand if you know which it is`));
   }
-  console.log(`${tree.length} folders on disk: ${linked} linked, ${ignored} ignored, ${loose} undecided`);
+  console.log(`${tree.length} folders on disk: ${linked} linked, ${ignored} ignored, ${loose} undecided, `
+    + `${empty} holding no archives (source directories and caches)`);
   if (rows.length) {
     console.log(`\nundecided, so their chapters are invisible to the library:`);
     console.log(rows.join("\n"));

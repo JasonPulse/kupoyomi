@@ -72,27 +72,36 @@ export async function nextWanted(limit?: number, blockSize?: number): Promise<Wa
   // touching the next, so a series near the end of the alphabet waited behind every
   // backlog in front of it: over a day for something the owner wanted to read.
   //
-  // Each outstanding chapter is ranked within its own series, and the rank divided by
-  // the block size gives a block number. Ordering by block first means every series
-  // gets its first 25 before any series gets its second 25. That needs no cursor and
-  // no new column, so it cannot drift out of step with the queue or lose its place on
-  // a restart, and a series added today lands in block 0 and starts immediately.
+  // Each chapter is ranked within its own series and the rank divided by the block size
+  // gives a block number, so no series gets its second 25 until every series has had a
+  // first. No cursor and no new column, so nothing can drift out of step with the queue
+  // or lose its place on a restart.
+  //
+  // The rank counts DONE rows too, and that is the whole trick. Ranking only the
+  // outstanding rows looks equivalent and is not: every completed chapter leaves the set
+  // and the rest shift up, so the next 25 of the alphabetically-first series are always
+  // block 0 again and it never yields. A Couple of Cuckoos took 321 chapters that way
+  // while Though I am an Inept Villainess sat on 4, which is exactly the monopoly the
+  // blocks exist to prevent. Counting completions makes a row's block fixed at the
+  // moment it is queued, and a series that has already had 300 waits behind one that
+  // has had none.
   return (await db().query<WantedRow>(
     `WITH ranked AS (
-       SELECT w.series_id, w.chapter_number, w.binding_id, w.attempts,
+       SELECT w.series_id, w.chapter_number, w.binding_id, w.attempts, w.state,
               row_number() OVER (PARTITION BY w.series_id ORDER BY w.chapter_number) AS rn
          FROM wanted w
          JOIN series s ON s.id = w.series_id
-        WHERE w.state IN ('pending','failed','fetching') AND w.attempts < 4
           -- A muted series is one the owner has told to stop. Its backlog is deleted
           -- when it stops, so this is a backstop against rows arriving by another route.
-          AND NOT s.muted
+        WHERE NOT s.muted
      )
      SELECT r.series_id, r.chapter_number, r.binding_id, b.source_id, b.source_name,
             b.source_url, s.title, s.folder, r.attempts
        FROM ranked r
        JOIN series_binding b ON b.id = r.binding_id
        JOIN series s ON s.id = r.series_id
+      -- Ranked over everything, filtered to what still needs fetching.
+      WHERE r.state IN ('pending','failed','fetching') AND r.attempts < 4
       -- Block first, then title so a series' own block stays contiguous and the
       -- downloader keeps hitting one source at a time rather than hopping.
       ORDER BY (r.rn - 1) / ${block}, s.title, r.chapter_number

@@ -195,3 +195,50 @@ test("a restart releases rows nothing is working any more", { skip: !haveDb }, a
 
   await p.query("UPDATE wanted SET state='pending' WHERE series_id=$1", [id]);
 });
+
+/**
+ * The monopoly the first version of this did not prevent.
+ *
+ * Ranking only the OUTSTANDING rows looks equivalent to ranking all of them and is not.
+ * Every completed chapter leaves the set and the rest shift up, so the next 25 of the
+ * alphabetically-first series land in block 0 again and it never yields. In production
+ * A Couple of Cuckoos took 321 chapters while Though I am an Inept Villainess sat on 4.
+ * The first three tests all passed while that was happening, because none of them had any
+ * completed rows.
+ */
+test("a series that has already had its turns waits behind one that has not", { skip: !haveDb }, async () => {
+  const p = db();
+  const hog = ids.get("Aardvark Saga")!;      // alphabetically first, so it wins every tie
+  const starved = ids.get("Zebra Chronicle")!; // alphabetically last
+
+  // The hog has been served 40 chapters already; the starved series none.
+  await p.query("UPDATE wanted SET state='done' WHERE series_id=$1 AND chapter_number <= 40", [hog]);
+  await p.query("UPDATE wanted SET state='pending' WHERE series_id=$1", [starved]);
+
+  const rows = await nextWanted(undefined, 25);
+  const firstHog = rows.findIndex((r) => r.series_id === hog);
+  const firstStarved = rows.findIndex((r) => r.series_id === starved);
+
+  assert.ok(firstStarved >= 0, "the starved series is in the queue at all");
+  assert.ok(firstStarved < firstHog,
+    `the series with no completions must be served first, but the hog appeared at ${firstHog} `
+    + `and the starved one at ${firstStarved}. Ranking only outstanding rows produces exactly this.`);
+
+  // Its remaining chapters are 41+, so they sit in block 1 and beyond, not back in block 0.
+  await p.query("UPDATE wanted SET state='pending' WHERE series_id=$1", [hog]);
+});
+
+test("completing a block does not put the next one back at the front", { skip: !haveDb }, async () => {
+  const p = db();
+  const hog = ids.get("Aardvark Saga")!;
+  const before = (await nextWanted(1, 25))[0];
+  assert.equal(before?.series_id, hog, "with nothing done, the alphabetically first series leads");
+
+  // Serve its whole first block, the way a few ticks would.
+  await p.query("UPDATE wanted SET state='done' WHERE series_id=$1 AND chapter_number <= 25", [hog]);
+  const after = (await nextWanted(1, 25))[0];
+  assert.notEqual(after?.series_id, hog,
+    "after a full block it must yield; if it leads again, completions are resetting the rank");
+
+  await p.query("UPDATE wanted SET state='pending' WHERE series_id=$1", [hog]);
+});

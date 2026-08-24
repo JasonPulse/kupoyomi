@@ -221,3 +221,60 @@ test("a series that recovers has its strikes forgotten", { skip: !haveDb }, asyn
   assert.equal(strikes.get(S), undefined,
     "a run of failures followed by a success must not leave the series one slip from being dropped");
 });
+
+/**
+ * When a failed chapter is tried again.
+ *
+ * There was no waiting. A failure was picked up on the series' next turn, so four attempts
+ * burned inside ninety minutes: 7th Time Loop lost ten chapters between 17:07 and 18:44
+ * while its source timed out, and chapter 26.6 downloaded successfully in that same window.
+ * The source was flaky, not gone, and a bad hour killed every chapter asked for during it.
+ */
+test("a failed chapter waits before it is tried again", { skip: !haveDb }, async () => {
+  const p = db();
+  const id = ids.get("Zebra Chronicle")!;
+  await p.query("UPDATE wanted SET state='pending', attempts=0, retry_after=NULL WHERE series_id=$1", [id]);
+  await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
+
+  const present = async (): Promise<boolean> =>
+    (await nextWanted(undefined, 25)).some((r) => r.series_id === id && Number(r.chapter_number) === 1);
+
+  assert.equal(await present(), true, "a pending chapter is a candidate");
+
+  // Failed a minute ago with fifteen minutes to wait.
+  await p.query(
+    `UPDATE wanted SET state='failed', attempts=1, retry_after = now() + interval '14 minutes'
+      WHERE series_id=$1 AND chapter_number=1`, [id]);
+  assert.equal(await present(), false, "it is not offered again the moment it fails");
+
+  // Once the wait is up it comes back on its own.
+  await p.query(
+    "UPDATE wanted SET retry_after = now() - interval '1 minute' WHERE series_id=$1 AND chapter_number=1", [id]);
+  assert.equal(await present(), true, "and when the wait is over it is a candidate again");
+
+  await p.query("UPDATE wanted SET state='pending', attempts=0, retry_after=NULL WHERE series_id=$1", [id]);
+});
+
+test("a chapter that has given up stays out until it is put back", { skip: !haveDb }, async () => {
+  const { retryFailed } = await import("../src/fetch.js");
+  const p = db();
+  const id = ids.get("Zebra Chronicle")!;
+  const max = Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6));
+  await p.query(
+    `UPDATE wanted SET state='failed', attempts=$2, retry_after=NULL, last_error='timeout'
+      WHERE series_id=$1 AND chapter_number=1`, [id, max]);
+
+  const present = async (): Promise<boolean> =>
+    (await nextWanted(undefined, 25)).some((r) => r.series_id === id && Number(r.chapter_number) === 1);
+  assert.equal(await present(), false, "at the limit it is no longer a candidate");
+
+  assert.ok(await retryFailed(id) >= 1, "retry reports what it put back");
+  assert.equal(await present(), true, "and it is a candidate again with a clean count");
+
+  const row = (await p.query<{ attempts: number; last_error: string | null }>(
+    "SELECT attempts, last_error FROM wanted WHERE series_id=$1 AND chapter_number=1", [id])).rows[0]!;
+  assert.equal(row.attempts, 0, "the count starts over rather than resuming at the limit");
+  assert.equal(row.last_error, null, "and the stale error is cleared");
+
+  await p.query("UPDATE wanted SET state='pending', attempts=0, retry_after=NULL WHERE series_id=$1", [id]);
+});

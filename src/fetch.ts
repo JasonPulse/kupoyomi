@@ -98,6 +98,7 @@ export type WantedRow = {
 /** The queue's serving order. Separated from the download loop so it can be proven. */
 export async function nextWanted(limit?: number, blockSize?: number): Promise<WantedRow[]> {
   const block = Math.max(1, Number(blockSize ?? process.env["FETCH_BLOCK"] ?? 25));
+  const maxAttempts = Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6));
   // Round-robin by block, not one series start to finish.
   //
   // Ordering by title alone drained the alphabetically-first series completely before
@@ -130,7 +131,9 @@ export async function nextWanted(limit?: number, blockSize?: number): Promise<Wa
               row_number() OVER (PARTITION BY w.series_id ORDER BY w.chapter_number) - 1 AS idx
          FROM wanted w
          JOIN series s ON s.id = w.series_id
-        WHERE w.state IN ('pending','failed','fetching') AND w.attempts < 4
+        WHERE w.state IN ('pending','failed','fetching') AND w.attempts < ${maxAttempts}
+          -- A row waiting out its backoff is not a candidate yet.
+          AND (w.retry_after IS NULL OR w.retry_after <= now())
           -- A muted series is one the owner has told to stop. Its backlog is deleted when
           -- it stops, so this is a backstop against rows arriving by another route.
           AND NOT s.muted
@@ -163,12 +166,31 @@ export async function nextWanted(limit?: number, blockSize?: number): Promise<Wa
  */
 export async function reclaimStuck(olderThanMinutes = 0): Promise<number> {
   const r = await db().query(
-    `UPDATE wanted SET state = 'pending', pages_done = 0, pages_total = NULL, started_at = NULL
+    `UPDATE wanted SET state = 'pending', pages_done = 0, pages_total = NULL, started_at = NULL,
+            retry_after = NULL
       WHERE state = 'fetching'
         AND (started_at IS NULL OR started_at < now() - ($1 || ' minutes')::interval)`,
     [String(Math.max(0, olderThanMinutes))]);
   const n = r.rowCount ?? 0;
   if (n > 0) console.log(`released ${n} chapter${n === 1 ? "" : "s"} left mid-download by a process that is gone`);
+  return n;
+}
+
+/**
+ * Puts given-up chapters back in the queue.
+ *
+ * Four attempts inside ninety minutes was no test of anything, so a source having a bad
+ * afternoon left chapters permanently dead with no way back short of editing the database.
+ * This is that way back, for one series or the whole library.
+ */
+export async function retryFailed(seriesId?: number): Promise<number> {
+  const max = Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6));
+  const r = await db().query(
+    `UPDATE wanted SET attempts = 0, retry_after = NULL, last_error = NULL, state = 'pending'
+      WHERE state = 'failed' AND attempts >= $1 ${seriesId ? "AND series_id = $2" : ""}`,
+    seriesId ? [max, seriesId] : [max]);
+  const n = r.rowCount ?? 0;
+  console.log(`${n} chapter${n === 1 ? "" : "s"} put back in the queue`);
   return n;
 }
 
@@ -276,7 +298,8 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
            VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (series_id, chapter_number) DO UPDATE SET file_path = EXCLUDED.file_path`,
           [it.series_id, it.chapter_number, dest, images.length, ch.scanlator, it.binding_id, uploaded]);
         await p.query(
-          "UPDATE wanted SET state='done', finished_at=now(), attempts=attempts+1, last_error=NULL WHERE series_id=$1 AND chapter_number=$2",
+          `UPDATE wanted SET state='done', finished_at=now(), attempts=attempts+1,
+             last_error=NULL, retry_after=NULL WHERE series_id=$1 AND chapter_number=$2`,
           [it.series_id, it.chapter_number]);
         done++;
         // Its turn advances by one chapter. Divided by the block size this is the turn
@@ -292,9 +315,15 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
           console.log(`  -- ${it.title.slice(0, 34)}: ${n} failures in a row, leaving the rest of it for the next run`);
         }
         const msg = err instanceof Error ? err.message.slice(0, 300) : String(err);
+        // Minutes, then an hour, then six, then a day. Four attempts used to fit inside
+        // ninety minutes, which is no test of whether a source has recovered.
+        const waits = [15, 60, 360, 1440, 1440, 1440];
+        const wait = waits[Math.min(it.attempts, waits.length - 1)]!;
         await p.query(
-          "UPDATE wanted SET state='failed', attempts=attempts+1, last_error=$3 WHERE series_id=$1 AND chapter_number=$2",
-          [it.series_id, it.chapter_number, msg]);
+          `UPDATE wanted SET state='failed', attempts=attempts+1, last_error=$3,
+             retry_after = now() + ($4 || ' minutes')::interval
+            WHERE series_id=$1 AND chapter_number=$2`,
+          [it.series_id, it.chapter_number, msg, String(wait)]);
         console.log(`  ERR ${it.title.slice(0, 34).padEnd(34)} ch ${it.chapter_number.padStart(8)}  ${msg.slice(0, 60)}`);
       }
     }

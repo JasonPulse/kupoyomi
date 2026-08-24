@@ -42,6 +42,7 @@ const usage = `kupoyomi <command>
   metadata [--force]         fetch covers and synopses for series missing them
   paid [--dry-run]           uninstall paid-subscription sources and report what used them
   adopt <seriesId> [--dry-run] [--propose]  adopt chapters from folders linked to a series
+  retry [seriesId]           put given-up chapters back in the queue
   ondisk                     every legacy folder, and which are not linked to a series yet
   link <seriesId> <path> [--ignore]  record that a folder belongs to a series, or does not
   aka <seriesId> <name> [--remove]  another name the series goes by, used to match folders
@@ -210,6 +211,12 @@ const main = async (): Promise<void> => {
     case "prune-folders": {
       const { pruneRedundant } = await import("./adopt.js");
       await pruneRedundant({ delete: process.argv.includes("--delete") });
+      break;
+    }
+    case "retry": {
+      const sid = Number(process.argv[3]);
+      const { retryFailed } = await import("./fetch.js");
+      await retryFailed(Number.isInteger(sid) ? sid : undefined);
       break;
     }
     case "ondisk": {

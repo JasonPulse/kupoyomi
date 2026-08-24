@@ -102,7 +102,9 @@ const stats = async (): Promise<Record<string, unknown>> => {
     // Stopping a series deletes its outstanding rows, so this needs no muted clause and
     // there is no second bucket to report.
     wanted_outstanding: await q("SELECT count(*) n FROM wanted WHERE state <> 'done'"),
-    wanted_failed: await q("SELECT count(*) n FROM wanted WHERE state = 'failed' AND attempts >= 4"),
+    wanted_failed: await q(
+      `SELECT count(*) n FROM wanted WHERE state = 'failed'
+        AND attempts >= ${Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6))}`),
     last_reconcile: lastReconcile,
     scheduler: schedState,
   };
@@ -420,6 +422,11 @@ export async function serve(): Promise<void> {
         const meta = /^\/series\/(\d+)\/metadata$/.exec(path);
         // Pressing the button means "give me a different answer", so it forces.
         if (meta) { await refreshMetadata(Number(meta[1]), { force: true }); return `/series/${meta[1]}`; }
+        if (path === "/queue/retry") {
+          const { retryFailed } = await import("./fetch.js");
+          await retryFailed();
+          return "/queue";
+        }
         const setCover = /^\/series\/(\d+)\/cover$/.exec(path);
         if (setCover) {
           const { setCoverFromPage } = await import("./metadata.js");

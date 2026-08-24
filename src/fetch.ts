@@ -18,6 +18,33 @@ type Binding = { id: number; series_id: number; source_id: string; source_name: 
  * Cheap and idempotent, so it is safe to run on a schedule: it is how new releases get
  * noticed at all.
  */
+/**
+ * Drops chapter numbers a source has plainly invented.
+ *
+ * Bbato lists "Chapter 5000" for A Couple of Cuckoos, whose next-highest chapter is 305.
+ * It has 36 real pages, so it is a chapter, but the number is a placeholder or a typo on
+ * their side. Taken at face value it made the series read as 0-5000 and turned gap
+ * detection into a list of four thousand missing chapters.
+ *
+ * Judged against the source's own list rather than any absolute limit, because a real
+ * series can genuinely be at chapter 1200. A number that sits hundreds above the next one
+ * down is not part of the same run.
+ */
+export function withoutOutliers(offered: number[], gap = Number(process.env["OUTLIER_GAP"] ?? 200)): {
+  kept: number[]; dropped: number[];
+} {
+  const sorted = [...new Set(offered)].sort((a, b) => a - b);
+  const dropped: number[] = [];
+  // From the top, because one absurd number can hide another.
+  while (sorted.length >= 3) {
+    const top = sorted[sorted.length - 1]!;
+    const next = sorted[sorted.length - 2]!;
+    if (top - next <= gap) break;
+    dropped.push(sorted.pop()!);
+  }
+  return { kept: sorted, dropped: dropped.reverse() };
+}
+
 export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void> {
   const p = db();
   const bindings = (await p.query<Binding>(
@@ -41,11 +68,16 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
     const offered = (await gql<{ manga: { chapters: { nodes: Array<{ chapterNumber: number | null }> } } }>(
       `{ manga(id:${mangaId}) { chapters { nodes { chapterNumber } } } }`)).manga.chapters.nodes
       .map((c) => c.chapterNumber).filter((n): n is number => n !== null);
+    const { kept: offered2, dropped } = withoutOutliers(offered);
+    if (dropped.length > 0) {
+      console.log(`  ${b.title.slice(0, 40)}: ignoring ${dropped.join(", ")} -- `
+        + `${dropped.length === 1 ? "that number is" : "those numbers are"} hundreds above the rest of the run`);
+    }
     const held = new Set((await p.query<{ chapter_number: string }>(
       "SELECT chapter_number FROM chapter WHERE series_id = $1", [b.series_id])).rows
       .map((r) => Number(r.chapter_number)));
 
-    for (const n of offered) {
+    for (const n of offered2) {
       if (held.has(n)) continue;
       const r = await p.query(
         `INSERT INTO wanted (series_id, chapter_number, binding_id) VALUES ($1,$2,$3)

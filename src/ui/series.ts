@@ -193,10 +193,11 @@ export async function seriesPage(id: number): Promise<string> {
      </div>`}
      <div class="card"><div class="title">Updates</div>
        ${!s.stalled_since ? "" : `<div class="meta" style="margin:0 0 9px">
-         <span class="warn">No new chapter since ${esc(ago(newestUpload, today))}.</span>
-         Flagged automatically after ${process.env["STALL_DAYS"] ?? 21} days of silence, so this is
-         something noticed rather than something you set. Either the series is between volumes, or
-         its source stopped carrying it and it wants a different one.</div>`}
+         <span class="warn">No update found since ${esc(ago(newestUpload, today))}.</span>
+         Noticed automatically after ${process.env["STALL_DAYS"] ?? 21} days without a new chapter,
+         so it is an observation and not something you set. Either the series is between volumes, or
+         its source stopped carrying it and it wants a different one.
+         ${process.env["NOTIFY_URL"] ? "" : "Nothing is notified: NOTIFY_URL is unset, so the flag is recorded and no alert is sent."}</div>`}
        <div class="actions" style="margin:0">
          <form method="post" action="/series/${id}/mute">
            <button class="weak" type="submit">${s.muted ? "start checking again" : "stop getting updates"}</button></form>

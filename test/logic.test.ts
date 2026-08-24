@@ -172,3 +172,34 @@ test("a real synopsis survives, even one that mentions a rating or the medium", 
     + "story, which spans several years and a large cast of colleagues and rivals she comes to "
     + "understand only after losing most of them to the industry she loves."), false);
 });
+
+// --- chapter numbers a source invented -----------------------------------------------
+const { withoutOutliers } = await import("../src/fetch.js");
+
+test("a number hundreds above the run is not part of it", () => {
+  // Bbato's real list for A Couple of Cuckoos: 326 chapters ending at 305, plus 5000.
+  const run = Array.from({ length: 306 }, (_, i) => i);
+  const { kept, dropped } = withoutOutliers([...run, 5000]);
+  assert.deepEqual(dropped, [5000]);
+  assert.equal(kept.at(-1), 305, "the real end of the run survives");
+  assert.equal(kept.length, 306);
+});
+
+test("one absurd number does not hide another", () => {
+  const { dropped } = withoutOutliers([1, 2, 3, 4, 5, 900, 5000]);
+  assert.deepEqual(dropped, [900, 5000], "both are dropped, from the top down");
+});
+
+test("a genuinely long series keeps its numbers", () => {
+  // One Piece is past 1100. Nothing here may treat a real run as an outlier.
+  const long = Array.from({ length: 1150 }, (_, i) => i + 1);
+  const { kept, dropped } = withoutOutliers(long);
+  assert.deepEqual(dropped, []);
+  assert.equal(kept.length, 1150);
+});
+
+test("decimals and a short list are left alone", () => {
+  assert.deepEqual(withoutOutliers([1, 1.5, 2, 2.5, 3]).dropped, []);
+  // Two chapters cannot establish a run, so nothing is judged an outlier.
+  assert.deepEqual(withoutOutliers([1, 9000]).dropped, []);
+});

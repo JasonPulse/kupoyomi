@@ -138,11 +138,30 @@ export async function refreshMetadata(
     return { cover: local.cover !== null, description: local.description !== null };
   }
 
-  const mangaId = await resolveManga(b.source_id, s.title, b.source_url);
-  await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:false,fetchManga:true}){ clientMutationId } }`,
-    { id: mangaId }).catch(() => undefined);
-  const d = (await gql<{ manga: { description: string | null; status: string; thumbnailUrl: string | null } }>(
-    `{ manga(id:${mangaId}) { description status thumbnailUrl } }`)).manga;
+  // A source that cannot find the series any more must not take the whole refresh down
+  // with it. Series 112's source stopped returning its url, so pressing the button
+  // produced "does not return /title/10022 for any of 2 query forms" and nothing else,
+  // when the files on disk could have answered perfectly well.
+  let d: { description: string | null; status: string; thumbnailUrl: string | null };
+  try {
+    const mangaId = await resolveManga(b.source_id, s.title, b.source_url);
+    await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:false,fetchManga:true}){ clientMutationId } }`,
+      { id: mangaId }).catch(() => undefined);
+    d = (await gql<{ manga: { description: string | null; status: string; thumbnailUrl: string | null } }>(
+      `{ manga(id:${mangaId}) { description status thumbnailUrl } }`)).manga;
+  } catch (err) {
+    console.log(`  ${s.title.slice(0, 40)}: source unreachable (${
+      err instanceof Error ? err.message.slice(0, 70) : String(err)}), using the files instead`);
+    const local = await localMetadata(seriesId, s.folder, opts.force ? { force: true } : {});
+    await p.query(
+      opts.force
+        ? `UPDATE series SET description = COALESCE($2, description),
+             cover_path = COALESCE($3, cover_path), metadata_at = now() WHERE id = $1`
+        : `UPDATE series SET description = COALESCE(description, $2),
+             cover_path = COALESCE($3, cover_path), metadata_at = now() WHERE id = $1`,
+      [seriesId, local.description, local.cover]);
+    return { cover: local.cover !== null, description: local.description !== null };
+  }
   if (d.description && looksLikeSiteCopy(d.description)) {
     console.log(`  ignoring the description from this source: it is site copy, not a synopsis`);
     d.description = null;

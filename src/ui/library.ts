@@ -68,7 +68,7 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
       ${r.wanted > 0 ? `<span class="flag">+${r.wanted}</span>`
         : r.unbound && !r.muted ? `<span class="flag bad">no source</span>`
         : r.stalled_since && !r.muted
-          ? `<span class="flag" title="no new chapter in a while, noticed automatically -- not something you set">quiet</span>`
+          ? `<span class="flag" title="no new chapter found in the last ${process.env["STALL_DAYS"] ?? 21} days. Noticed automatically; not something you set">no updates</span>`
           : ""}
       <div class="pb"><i style="width:${pct(r)}%"></i></div>
       <div class="t">${esc(r.title)}</div>
@@ -99,7 +99,7 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
        <div class="tile"><div class="n">series</div><b style="font-size:20px">${totals.series}</b></div>
        <div class="tile"><div class="n">chapters held</div><b style="font-size:20px">${totals.chapters}</b></div>
        <div class="tile"><div class="n">queued</div><b style="font-size:20px">${totals.wanted}</b></div>
-       <div class="tile"><div class="n">gone quiet</div><b style="font-size:20px">${totals.stalled}</b></div>
+       <div class="tile"><div class="n">no updates found</div><b style="font-size:20px">${totals.stalled}</b></div>
      </div>
      <div class="card">
        <form method="get" action="/" style="display:flex;gap:8px;align-items:center">

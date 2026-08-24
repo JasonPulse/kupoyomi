@@ -1,0 +1,12 @@
+-- How many chapters a series has been served in its current turn.
+--
+-- The block ordering ranked a series' rows against everything ever queued for it, so a
+-- series with 300 completed downloads sat in block 12 while a freshly imported one sat in
+-- block 0, and block 0 went first. That is catch-up, not rotation: the established series
+-- waits for every other one to reach its block number, which is the original starvation
+-- with the order reversed.
+--
+-- A turn is per backlog, not per lifetime. The counter rises as chapters are served and
+-- resets when the series runs out of queued work, so a series rejoining with new chapters
+-- starts at the front rather than behind its own history.
+ALTER TABLE series ADD COLUMN served integer NOT NULL DEFAULT 0;

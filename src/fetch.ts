@@ -77,34 +77,33 @@ export async function nextWanted(limit?: number, blockSize?: number): Promise<Wa
   // first. No cursor and no new column, so nothing can drift out of step with the queue
   // or lose its place on a restart.
   //
-  // The rank counts DONE rows too, and that is the whole trick. Ranking only the
-  // outstanding rows looks equivalent and is not: every completed chapter leaves the set
-  // and the rest shift up, so the next 25 of the alphabetically-first series are always
-  // block 0 again and it never yields. A Couple of Cuckoos took 321 chapters that way
-  // while Though I am an Inept Villainess sat on 4, which is exactly the monopoly the
-  // blocks exist to prevent. Counting completions makes a row's block fixed at the
-  // moment it is queued, and a series that has already had 300 waits behind one that
-  // has had none.
+  // The turn is series.served divided by the block size: how many blocks this series has
+  // already taken in its current backlog. Everyone starts at turn 0, takes 25, moves to
+  // turn 1, and the lowest turn is always served first.
+  //
+  // Two earlier attempts were wrong in opposite directions. Ranking only the OUTSTANDING
+  // rows let the alphabetically-first series keep block 0 forever, because completed rows
+  // left the set and the rest shifted up: A Couple of Cuckoos took 321 chapters while
+  // Though I am an Inept Villainess sat on 4. Ranking rows against everything ever queued
+  // fixed that and broke the mirror image, putting a series with 300 completions in block
+  // 12 where it waited for every other series to catch up to it.
+  //
+  // A counter that resets when the backlog empties is neither: a turn is per backlog, so
+  // a series rejoining with new chapters starts at the front instead of behind its own
+  // history, and one with a thousand queued cycles through turns as it drains.
   return (await db().query<WantedRow>(
-    `WITH ranked AS (
-       SELECT w.series_id, w.chapter_number, w.binding_id, w.attempts, w.state,
-              row_number() OVER (PARTITION BY w.series_id ORDER BY w.chapter_number) AS rn
-         FROM wanted w
-         JOIN series s ON s.id = w.series_id
-          -- A muted series is one the owner has told to stop. Its backlog is deleted
-          -- when it stops, so this is a backstop against rows arriving by another route.
-        WHERE NOT s.muted
-     )
-     SELECT r.series_id, r.chapter_number, r.binding_id, b.source_id, b.source_name,
-            b.source_url, s.title, s.folder, r.attempts
-       FROM ranked r
-       JOIN series_binding b ON b.id = r.binding_id
-       JOIN series s ON s.id = r.series_id
-      -- Ranked over everything, filtered to what still needs fetching.
-      WHERE r.state IN ('pending','failed','fetching') AND r.attempts < 4
-      -- Block first, then title so a series' own block stays contiguous and the
-      -- downloader keeps hitting one source at a time rather than hopping.
-      ORDER BY (r.rn - 1) / ${block}, s.title, r.chapter_number
+    `SELECT w.series_id, w.chapter_number, w.binding_id, b.source_id, b.source_name,
+            b.source_url, s.title, s.folder, w.attempts
+       FROM wanted w
+       JOIN series_binding b ON b.id = w.binding_id
+       JOIN series s ON s.id = w.series_id
+      WHERE w.state IN ('pending','failed','fetching') AND w.attempts < 4
+        -- A muted series is one the owner has told to stop. Its backlog is deleted when
+        -- it stops, so this is a backstop against rows arriving by another route.
+        AND NOT s.muted
+      -- Turn first, then title so a series' own block stays contiguous and the downloader
+      -- keeps hitting one source at a time rather than hopping between them.
+      ORDER BY s.served / ${block}, s.title, w.chapter_number
       ${limit ? `LIMIT ${Number(limit)}` : ""}`)).rows;
 }
 
@@ -239,6 +238,9 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
           "UPDATE wanted SET state='done', finished_at=now(), attempts=attempts+1, last_error=NULL WHERE series_id=$1 AND chapter_number=$2",
           [it.series_id, it.chapter_number]);
         done++;
+        // Its turn advances by one chapter. Divided by the block size this is the turn
+        // number, so twenty-five successes move the series behind the others.
+        await p.query("UPDATE series SET served = served + 1 WHERE id = $1", [it.series_id]);
         strikes.delete(it.series_id);   // it works after all, so the count starts over
         console.log(`  ok  ${it.title.slice(0, 34).padEnd(34)} ch ${it.chapter_number.padStart(8)}  ${images.length}p`);
       } catch (err) {
@@ -260,6 +262,13 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
   for (let i = 0; i < queues.length; i += concurrency) {
     await Promise.all(queues.slice(i, i + concurrency).map(runSource));
   }
+  // A series with nothing left owes no turns. Clearing it means new chapters arriving
+  // tomorrow start at the front rather than behind however much it downloaded today.
+  const reset = await p.query(
+    `UPDATE series SET served = 0 WHERE served > 0 AND NOT EXISTS (
+       SELECT 1 FROM wanted w WHERE w.series_id = series.id
+         AND w.state IN ('pending','failed','fetching') AND w.attempts < 4)`);
   console.log(`\ndownloaded ${done}, failed ${failed}, ${(bytes / 1048576).toFixed(0)}MB` +
-    (skipped > 0 ? `, ${skipped} left for the next run behind a series that kept failing` : ""));
+    (skipped > 0 ? `, ${skipped} left for the next run behind a series that kept failing` : "") +
+    ((reset.rowCount ?? 0) > 0 ? `, ${reset.rowCount} finished their backlog and rejoin at the front` : ""));
 }

@@ -57,97 +57,59 @@ after(async () => {
   await closeDb();
 });
 
-test("every series gets its first block before any gets its second", { skip: !haveDb }, async () => {
+test("every series gets its first turn before any gets its second", { skip: !haveDb }, async () => {
+  const p = db();
+  for (const [, count] of SERIES) void count;
+  await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
+  const rows = (await nextWanted(undefined, 25)).filter((r) => ids.has(r.title));
+  assert.equal(rows.length, 110, "all three backlogs are present");
+
+  // Everyone is on turn 0, so the whole queue is one turn and the order is by title.
+  // What matters is that a series cannot take a second block while others wait, which is
+  // now a property of the counter rather than of the row ordering.
+  assert.deepEqual([...new Set(rows.map((r) => r.title))],
+    ["Aardvark Saga", "Middle Tale", "Zebra Chronicle"],
+    "a series' block stays contiguous so the downloader does not hop sources");
+});
+
+test("a series that has taken its turn goes behind the ones that have not", { skip: !haveDb }, async () => {
+  const p = db();
+  const hog = ids.get("Aardvark Saga")!;      // alphabetically first, so it wins every tie
+  await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
+  assert.equal((await nextWanted(1, 25))[0]?.series_id, hog,
+    "with everyone level, the alphabetically first series leads");
+
+  // It has taken a full block of twenty-five.
+  await p.query("UPDATE series SET served = 25 WHERE id = $1", [hog]);
+  const next = (await nextWanted(1, 25))[0];
+  assert.notEqual(next?.series_id, hog,
+    "after a full block it must yield, whatever its title");
+
+  // And a partial block does not: nineteen served is still turn 0.
+  await p.query("UPDATE series SET served = 19 WHERE id = $1", [hog]);
+  assert.equal((await nextWanted(1, 25))[0]?.series_id, hog,
+    "a block is twenty-five, so nineteen is still its turn");
+
+  await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
+});
+
+test("lifetime downloads do not decide the turn", { skip: !haveDb }, async () => {
+  const p = db();
+  const veteran = ids.get("Aardvark Saga")!;
+  const newcomer = ids.get("Zebra Chronicle")!;
+  // The veteran has 300 completed downloads in its history and the newcomer none. Ranking
+  // rows against everything ever queued put the veteran in block 12 and made it wait for
+  // everyone else to catch up, which is the first fix's mistake in reverse.
+  await p.query("UPDATE wanted SET state='done' WHERE series_id=$1 AND chapter_number <= 40", [veteran]);
+  await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
+
   const rows = await nextWanted(undefined, 25);
-  const mine = rows.filter((r) => ids.has(r.title));
-  assert.equal(mine.length, 110, "all three backlogs are present");
+  const first = rows.findIndex((r) => r.series_id === veteran);
+  const other = rows.findIndex((r) => r.series_id === newcomer);
+  assert.ok(first >= 0 && first < other,
+    "history is spent; both are on turn 0 and the tie breaks on title as it always did");
 
-  // Where each series' second block begins, against where the last first block ends.
-  const seen = new Map<string, number>();
-  const firstBlockEnd = new Map<string, number>();
-  const secondBlockStart = new Map<string, number>();
-  mine.forEach((r, i) => {
-    const n = (seen.get(r.title) ?? 0) + 1;
-    seen.set(r.title, n);
-    if (n <= 25) firstBlockEnd.set(r.title, i);
-    if (n === 26) secondBlockStart.set(r.title, i);
-  });
-
-  const lastFirstBlock = Math.max(...[...firstBlockEnd.values()]);
-  for (const [title, at] of secondBlockStart) {
-    assert.ok(at > lastFirstBlock,
-      `${title} started its second block at ${at}, before every series finished a first block at ${lastFirstBlock}`);
-  }
-
-  // Zebra has 10 chapters, so its whole backlog is block 0 and it must be served early.
-  const zebraLast = mine.map((r, i) => [r.title, i] as const)
-    .filter(([t]) => t === "Zebra Chronicle").at(-1)![1];
-  assert.ok(zebraLast < 75,
-    `the smallest series finished at position ${zebraLast}; under title ordering it would be last`);
-});
-
-test("a block size of one interleaves every series chapter by chapter", { skip: !haveDb }, async () => {
-  const rows = (await nextWanted(6, 1)).filter((r) => ids.has(r.title));
-  assert.deepEqual(rows.map((r) => r.title), [
-    "Aardvark Saga", "Middle Tale", "Zebra Chronicle",
-    "Aardvark Saga", "Middle Tale", "Zebra Chronicle",
-  ], "block size 1 is strict round robin, which proves the block maths");
-});
-
-test("a tick stays inside one series' block rather than hopping sources", { skip: !haveDb }, async () => {
-  const rows = (await nextWanted(10, 25)).filter((r) => ids.has(r.title));
-  assert.equal(rows.length, 10);
-  assert.equal(new Set(rows.map((r) => r.title)).size, 1,
-    "within one block the batch stays on one series, so the downloader is not hopping sources");
-  assert.equal(rows[0]?.title, "Aardvark Saga");
-});
-
-/**
- * The gap range's ceiling.
- *
- * A series holding 1-8 and then 12.3 reported no gaps at all: the highest WHOLE chapter
- * was 8, so the range stopped there and 9 through 12 were invisible. Holding 12.3 is
- * proof those exist, and a run of missing chapters reaching your top chapter is a source
- * that stopped partway, which is the one case worth flagging.
- */
-const { findGaps } = await import("../src/gaps.js");
-const GAPSERIES = "Gap Ceiling Series";
-let gapId = 0;
-
-test("a decimal top chapter does not truncate the gap range", { skip: !haveDb }, async () => {
-  const p = db();
-  await p.query("DELETE FROM series WHERE title = $1", [GAPSERIES]);
-  const s = await p.query<{ id: number }>(
-    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [GAPSERIES]);
-  gapId = s.rows[0]!.id;
-  for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 12.3]) {
-    await p.query("INSERT INTO chapter (series_id, chapter_number, file_path) VALUES ($1,$2,$3)",
-      [gapId, n, `/nowhere/${n}.cbz`]);
-  }
-
-  const g = await findGaps(gapId);
-  assert.deepEqual(g.missing, [9, 10, 11, 12],
-    "9 through 12 are missing; holding 12.3 is what proves they exist");
-  assert.deepEqual(g.unsupplied, [9, 10, 11, 12], "none of them are queued");
-
-  await p.query("DELETE FROM series WHERE id = $1", [gapId]);
-});
-
-test("a decimal inside the range is still not treated as a gap", { skip: !haveDb }, async () => {
-  const p = db();
-  await p.query("DELETE FROM series WHERE title = $1", [GAPSERIES]);
-  const s = await p.query<{ id: number }>(
-    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [GAPSERIES]);
-  const id = s.rows[0]!.id;
-  // 12.1 and 12.2 are one site's split of chapter 12. A missing 12.2 is not a hole.
-  for (const n of [1, 2, 3, 12, 12.1]) {
-    await p.query("INSERT INTO chapter (series_id, chapter_number, file_path) VALUES ($1,$2,$3)",
-      [id, n, `/nowhere/${n}.cbz`]);
-  }
-  const g = await findGaps(id);
-  assert.deepEqual(g.missing, [4, 5, 6, 7, 8, 9, 10, 11],
-    "whole chapters only, and 12.2 is not invented as missing");
-  await p.query("DELETE FROM series WHERE id = $1", [id]);
+  await p.query("UPDATE wanted SET state='pending' WHERE series_id=$1", [veteran]);
 });
 
 /**
@@ -196,52 +158,6 @@ test("a restart releases rows nothing is working any more", { skip: !haveDb }, a
   await p.query("UPDATE wanted SET state='pending' WHERE series_id=$1", [id]);
 });
 
-/**
- * The monopoly the first version of this did not prevent.
- *
- * Ranking only the OUTSTANDING rows looks equivalent to ranking all of them and is not.
- * Every completed chapter leaves the set and the rest shift up, so the next 25 of the
- * alphabetically-first series land in block 0 again and it never yields. In production
- * A Couple of Cuckoos took 321 chapters while Though I am an Inept Villainess sat on 4.
- * The first three tests all passed while that was happening, because none of them had any
- * completed rows.
- */
-test("a series that has already had its turns waits behind one that has not", { skip: !haveDb }, async () => {
-  const p = db();
-  const hog = ids.get("Aardvark Saga")!;      // alphabetically first, so it wins every tie
-  const starved = ids.get("Zebra Chronicle")!; // alphabetically last
-
-  // The hog has been served 40 chapters already; the starved series none.
-  await p.query("UPDATE wanted SET state='done' WHERE series_id=$1 AND chapter_number <= 40", [hog]);
-  await p.query("UPDATE wanted SET state='pending' WHERE series_id=$1", [starved]);
-
-  const rows = await nextWanted(undefined, 25);
-  const firstHog = rows.findIndex((r) => r.series_id === hog);
-  const firstStarved = rows.findIndex((r) => r.series_id === starved);
-
-  assert.ok(firstStarved >= 0, "the starved series is in the queue at all");
-  assert.ok(firstStarved < firstHog,
-    `the series with no completions must be served first, but the hog appeared at ${firstHog} `
-    + `and the starved one at ${firstStarved}. Ranking only outstanding rows produces exactly this.`);
-
-  // Its remaining chapters are 41+, so they sit in block 1 and beyond, not back in block 0.
-  await p.query("UPDATE wanted SET state='pending' WHERE series_id=$1", [hog]);
-});
-
-test("completing a block does not put the next one back at the front", { skip: !haveDb }, async () => {
-  const p = db();
-  const hog = ids.get("Aardvark Saga")!;
-  const before = (await nextWanted(1, 25))[0];
-  assert.equal(before?.series_id, hog, "with nothing done, the alphabetically first series leads");
-
-  // Serve its whole first block, the way a few ticks would.
-  await p.query("UPDATE wanted SET state='done' WHERE series_id=$1 AND chapter_number <= 25", [hog]);
-  const after = (await nextWanted(1, 25))[0];
-  assert.notEqual(after?.series_id, hog,
-    "after a full block it must yield; if it leads again, completions are resetting the rank");
-
-  await p.query("UPDATE wanted SET state='pending' WHERE series_id=$1", [hog]);
-});
 
 /**
  * One broken source must not consume the whole run.

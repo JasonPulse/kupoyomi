@@ -122,6 +122,7 @@ export async function seriesPage(id: number): Promise<string> {
        <div class="actions">
          <form method="post" action="/series/${id}/scan"><button class="weak" type="submit">check for new chapters</button></form>
          <form method="post" action="/series/${id}/metadata"><button class="weak" type="submit">refresh cover &amp; synopsis</button></form>
+         <a href="/series/${id}/pick-cover" style="text-decoration:none"><button class="weak" type="button">pick a cover</button></a>
          <form method="post" action="/series/${id}/read" style="display:inline">
            <input type="hidden" name="chapter" value="${fmt(held[0] ?? null)}">
            <button class="weak" type="submit">mark all read</button></form>

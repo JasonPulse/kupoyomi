@@ -626,3 +626,53 @@ test("recently updated is ordered by when the library gained a chapter", { skip:
 
   for (const t of [OLD, NEW]) await p.query("DELETE FROM series WHERE title = $1", [t]);
 });
+
+/**
+ * Replacing a cover, and why the button did nothing.
+ *
+ * refreshMetadata wrote cover_path with COALESCE($3, cover_path), so once a series had a
+ * cover it could never get a different one. Six imported series showed a credits page or a
+ * wall of panels and "refresh cover & synopsis" was incapable of changing any of them.
+ */
+test("a forced refresh replaces a cover, and an unforced one does not", { skip: !haveDb }, async () => {
+  const { refreshMetadata } = await import("../src/metadata.js");
+  const { setCoverFromPage } = await import("../src/metadata.js");
+  const { buildCbz } = await import("../src/cbz.js");
+  const { mkdirSync: mk, writeFileSync: wf, readFileSync: rf } = await import("node:fs");
+  const p = db();
+  const TITLE = "Cover Replacement Series";
+  await p.query("DELETE FROM series WHERE title = $1", [TITLE]);
+  const s = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [TITLE]);
+  const sid = s.rows[0]!.id;
+
+  const dir = join(libraryRoot, TITLE);
+  mk(dir, { recursive: true });
+  const PAGE1 = jpegOf(1000, 1400, "PAGE-ONE");
+  const PAGE2 = jpegOf(1000, 1400, "PAGE-TWO");
+  const file = join(dir, `${TITLE} - c0001.cbz`);
+  wf(file, buildCbz([{ name: "001.jpg", data: PAGE1 }, { name: "002.jpg", data: PAGE2 }],
+    new Date("2026-01-01T00:00:00Z")));
+  await p.query("INSERT INTO chapter (series_id, chapter_number, file_path) VALUES ($1,1,$2)", [sid, file]);
+
+  // A cover already on disk, standing in for the credits page these series ended up with.
+  wf(join(dir, "cover.jpg"), Buffer.from("WRONG-COVER"));
+  await p.query("UPDATE series SET cover_path = $2 WHERE id = $1", [sid, join(dir, "cover.jpg")]);
+
+  await refreshMetadata(sid);
+  assert.deepEqual(rf(join(dir, "cover.jpg")), Buffer.from("WRONG-COVER"),
+    "without force the existing cover stands, which is right for the scheduled pass");
+
+  await refreshMetadata(sid, { force: true });
+  assert.notDeepEqual(rf(join(dir, "cover.jpg")), Buffer.from("WRONG-COVER"),
+    "with force it is replaced, which is what pressing the button means");
+
+  // And a chosen page wins outright, since shape cannot tell a cover from a panel.
+  await setCoverFromPage(sid, "1.0000", 1);
+  assert.deepEqual(rf(join(dir, "cover.jpg")), PAGE2, "page two is now the cover");
+  const row = (await p.query<{ cover_path: string }>(
+    "SELECT cover_path FROM series WHERE id = $1", [sid])).rows[0]!;
+  assert.equal(row.cover_path, join(dir, "cover.jpg"));
+
+  await p.query("DELETE FROM series WHERE id = $1", [sid]);
+});

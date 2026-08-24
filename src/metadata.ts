@@ -55,7 +55,9 @@ export function looksLikeSiteCopy(text: string): boolean {
  * because every route to a cover went through a source. The first page of the earliest
  * chapter is a cover: it is what the scanlator put there, and it is on disk already.
  */
-async function localMetadata(seriesId: number, folder: string): Promise<{ cover: string | null; description: string | null }> {
+async function localMetadata(
+  seriesId: number, folder: string, opts: { force?: boolean } = {},
+): Promise<{ cover: string | null; description: string | null }> {
   const dir = `${config.libraryRoot}/${folder}`;
   const first = (await db().query<{ file_path: string }>(
     "SELECT file_path FROM chapter WHERE series_id = $1 ORDER BY chapter_number LIMIT 1",
@@ -63,8 +65,9 @@ async function localMetadata(seriesId: number, folder: string): Promise<{ cover:
 
   let cover: string | null = null;
   // A cover.jpg already sitting in the folder is either ours from a previous run or one
-  // komf left behind. Either way it is a real cover, so adopt it rather than redo it.
-  if (existsSync(`${dir}/cover.jpg`)) cover = `${dir}/cover.jpg`;
+  // komf left behind. Either way it is a real cover, so adopt it rather than redo it --
+  // unless the caller is explicitly replacing it, which is the whole point of asking.
+  if (!opts.force && existsSync(`${dir}/cover.jpg`)) cover = `${dir}/cover.jpg`;
 
   let description: string | null = null;
   if (first) {
@@ -107,7 +110,9 @@ async function localMetadata(seriesId: number, folder: string): Promise<{ cover:
   return { cover, description };
 }
 
-export async function refreshMetadata(seriesId: number): Promise<{ cover: boolean; description: boolean }> {
+export async function refreshMetadata(
+  seriesId: number, opts: { force?: boolean } = {},
+): Promise<{ cover: boolean; description: boolean }> {
   const p = db();
   const s = (await p.query<{ title: string; folder: string }>(
     "SELECT title, folder FROM series WHERE id = $1", [seriesId])).rows[0];
@@ -119,10 +124,16 @@ export async function refreshMetadata(seriesId: number): Promise<{ cover: boolea
   // No binding means an archived series, and it used to return here empty-handed. The
   // files are still on disk, so there is no reason for it to have no cover.
   if (!b?.source_url) {
-    const local = await localMetadata(seriesId, s.folder);
+    const local = await localMetadata(seriesId, s.folder, opts.force ? { force: true } : {});
+    // With force, a new answer replaces the old one. Without it, the old one stands.
+    // "Refresh cover and synopsis" used to COALESCE, so a series that already had a
+    // cover could never get a different one and the button did nothing at all.
     await p.query(
-      `UPDATE series SET description = COALESCE(description, $2),
-         cover_path = COALESCE($3, cover_path), metadata_at = now() WHERE id = $1`,
+      opts.force
+        ? `UPDATE series SET description = COALESCE($2, description),
+             cover_path = COALESCE($3, cover_path), metadata_at = now() WHERE id = $1`
+        : `UPDATE series SET description = COALESCE(description, $2),
+             cover_path = COALESCE($3, cover_path), metadata_at = now() WHERE id = $1`,
       [seriesId, local.description, local.cover]);
     return { cover: local.cover !== null, description: local.description !== null };
   }
@@ -158,7 +169,7 @@ export async function refreshMetadata(seriesId: number): Promise<{ cover: boolea
   // leave the series blank when the first page is sitting right there.
   let localDesc: string | null = null;
   if (!coverPath || !d.description) {
-    const local = await localMetadata(seriesId, s.folder);
+    const local = await localMetadata(seriesId, s.folder, opts.force ? { force: true } : {});
     coverPath = coverPath ?? local.cover;
     localDesc = local.description;
   }
@@ -190,7 +201,7 @@ export async function refreshAllMetadata(opts: { force?: boolean; limit?: number
   let cover = 0, desc = 0, failed = 0;
   for (const r of rows) {
     try {
-      const got = await refreshMetadata(r.id);
+      const got = await refreshMetadata(r.id, opts.force ? { force: true } : {});
       if (got.cover) cover++;
       if (got.description) desc++;
       console.log(`  ${got.cover ? "cover" : "     "} ${got.description ? "text" : "    "}  ${r.title.slice(0, 52)}`);
@@ -200,4 +211,44 @@ export async function refreshAllMetadata(opts: { force?: boolean; limit?: number
     }
   }
   console.log(`covers ${cover}, synopses ${desc}, failed ${failed}`);
+}
+
+/**
+ * Uses a chosen page of a chapter as the cover.
+ *
+ * Shape is not enough to tell a cover from a comic page: both are about 1000 by 1400.
+ * Six imported series ended up with a credits page, a page of panels, or a black page of
+ * sound effects, and no heuristic reading bytes will reliably tell those from artwork.
+ * A person looking at them can, in one glance, so this exists.
+ */
+export async function setCoverFromPage(seriesId: number, chapter: string, index: number): Promise<void> {
+  const { getPage } = await import("./pbapi.js");
+  const p = db();
+  const s = (await p.query<{ folder: string }>(
+    "SELECT folder FROM series WHERE id = $1", [seriesId])).rows[0];
+  if (!s) throw new Error(`no series ${seriesId}`);
+  const img = await getPage(seriesId, chapter, index);
+  if (!img) throw new Error(`no page ${index} in chapter ${chapter}`);
+
+  const dir = `${config.libraryRoot}/${s.folder}`;
+  mkdirSync(dir, { recursive: true });
+  const tmp = `${dir}/.cover.part`;
+  writeFileSync(tmp, img.body);
+  renameSync(tmp, `${dir}/cover.jpg`);
+  await p.query("UPDATE series SET cover_path = $2, metadata_at = now() WHERE id = $1",
+    [seriesId, `${dir}/cover.jpg`]);
+}
+
+/** The chapters worth offering pages from: the earliest few, where a cover would be. */
+export async function coverCandidates(seriesId: number): Promise<Array<{ chapter: string; pages: number }>> {
+  const { getPages } = await import("./pbapi.js");
+  const rows = (await db().query<{ n: string }>(
+    "SELECT chapter_number::text AS n FROM chapter WHERE series_id = $1 ORDER BY chapter_number LIMIT 3",
+    [seriesId])).rows;
+  const out: Array<{ chapter: string; pages: number }> = [];
+  for (const r of rows) {
+    const pages = await getPages(seriesId, r.n).catch(() => null);
+    if (pages && pages.length > 0) out.push({ chapter: r.n, pages: Math.min(pages.length, 10) });
+  }
+  return out;
 }

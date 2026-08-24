@@ -333,6 +333,11 @@ export async function serve(): Promise<void> {
           .catch((e: unknown) => send(200, { error: e instanceof Error ? e.message : String(e) }));
         return;
       }
+      const pick = /^\/series\/(\d+)\/pick-cover$/.exec(path);
+      if (pick) {
+        // This handler is not async, so the import is chained rather than awaited.
+        return html(import("./ui/pickcover.js").then((m) => m.pickCoverPage(Number(pick[1]))));
+      }
       const cover = /^\/series\/(\d+)\/cover$/.exec(path);
       if (cover) {
         db().query<{ cover_path: string | null }>("SELECT cover_path FROM series WHERE id = $1", [Number(cover[1])])
@@ -367,7 +372,9 @@ export async function serve(): Promise<void> {
           // Queue what the source has and fetch the cover, but do not make the caller
           // wait: adding from a search should be instant so several can be added in a row.
           void scanWanted({ seriesId: id }).catch(() => undefined);
-          void refreshMetadata(id).catch(() => undefined);
+          // Forced: a series that was imported from a folder already has a cover taken
+          // from a page, and the source's own artwork is the better answer.
+          void refreshMetadata(id, { force: true }).catch(() => undefined);
           return `/series/${id}`;
         }
         const scan = /^\/series\/(\d+)\/scan$/.exec(path);
@@ -405,10 +412,21 @@ export async function serve(): Promise<void> {
           // scans, the queue still reflects the old one. Not awaited, so the page comes
           // straight back rather than sitting on a live search.
           void scanWanted({ seriesId: sid }).catch(() => undefined);
+          // A source has real cover art, which beats a page picked out of a chapter. All
+          // six series showing a credits page or a wall of panels had no source at all.
+          void refreshMetadata(sid, { force: true }).catch(() => undefined);
           return `/series/${sid}`;
         }
         const meta = /^\/series\/(\d+)\/metadata$/.exec(path);
-        if (meta) { await refreshMetadata(Number(meta[1])); return `/series/${meta[1]}`; }
+        // Pressing the button means "give me a different answer", so it forces.
+        if (meta) { await refreshMetadata(Number(meta[1]), { force: true }); return `/series/${meta[1]}`; }
+        const setCover = /^\/series\/(\d+)\/cover$/.exec(path);
+        if (setCover) {
+          const { setCoverFromPage } = await import("./metadata.js");
+          await setCoverFromPage(Number(setCover[1]), (form.get("chapter") ?? "").trim(),
+            Number(form.get("index") ?? 0));
+          return `/series/${setCover[1]}`;
+        }
         const aka = /^\/series\/(\d+)\/aka$/.exec(path);
         if (aka) {
           const { addAlias, removeAlias } = await import("./adopt.js");

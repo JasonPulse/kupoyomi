@@ -72,6 +72,27 @@ test("every series gets its first turn before any gets its second", { skip: !hav
     "a series' block stays contiguous so the downloader does not hop sources");
 });
 
+test("a partial block plus a full one is still only one turn", { skip: !haveDb }, async () => {
+  const p = db();
+  const hog = ids.get("Aardvark Saga")!;
+  await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
+
+  // It took ten in one tick. A turn is twenty-five, so fifteen are left in this turn and
+  // no more. Ranking on served alone gave it a fresh twenty-five here, so Justice for the
+  // Villainess took 38 chapters in what was meant to be a block.
+  await p.query("UPDATE wanted SET state='done' WHERE series_id=$1 AND chapter_number <= 10", [hog]);
+  await p.query("UPDATE series SET served = 10 WHERE id = $1", [hog]);
+
+  const rows = await nextWanted(undefined, 25);
+  let run = 0;
+  for (const r of rows) { if (r.series_id !== hog) break; run++; }
+  assert.equal(run, 15,
+    `after ten served, fifteen remain in the turn, not twenty-five: got ${run}`);
+
+  await p.query("UPDATE wanted SET state='pending' WHERE series_id=$1", [hog]);
+  await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
+});
+
 test("a series that has taken its turn goes behind the ones that have not", { skip: !haveDb }, async () => {
   const p = db();
   const hog = ids.get("Aardvark Saga")!;      // alphabetically first, so it wins every tie

@@ -92,18 +92,27 @@ export async function nextWanted(limit?: number, blockSize?: number): Promise<Wa
   // a series rejoining with new chapters starts at the front instead of behind its own
   // history, and one with a thousand queued cycles through turns as it drains.
   return (await db().query<WantedRow>(
-    `SELECT w.series_id, w.chapter_number, w.binding_id, b.source_id, b.source_name,
-            b.source_url, s.title, s.folder, w.attempts
-       FROM wanted w
-       JOIN series_binding b ON b.id = w.binding_id
-       JOIN series s ON s.id = w.series_id
-      WHERE w.state IN ('pending','failed','fetching') AND w.attempts < 4
-        -- A muted series is one the owner has told to stop. Its backlog is deleted when
-        -- it stops, so this is a backstop against rows arriving by another route.
-        AND NOT s.muted
-      -- Turn first, then title so a series' own block stays contiguous and the downloader
-      -- keeps hitting one source at a time rather than hopping between them.
-      ORDER BY s.served / ${block}, s.title, w.chapter_number
+    `WITH q AS (
+       SELECT w.series_id, w.chapter_number, w.binding_id, w.attempts,
+              s.title, s.folder, s.served,
+              row_number() OVER (PARTITION BY w.series_id ORDER BY w.chapter_number) - 1 AS idx
+         FROM wanted w
+         JOIN series s ON s.id = w.series_id
+        WHERE w.state IN ('pending','failed','fetching') AND w.attempts < 4
+          -- A muted series is one the owner has told to stop. Its backlog is deleted when
+          -- it stops, so this is a backstop against rows arriving by another route.
+          AND NOT s.muted
+     )
+     SELECT q.series_id, q.chapter_number, q.binding_id, b.source_id, b.source_name,
+            b.source_url, q.title, q.folder, q.attempts
+       FROM q JOIN series_binding b ON b.id = q.binding_id
+      -- served + position is the row's turn, and the sum is what makes it hold still.
+      -- Serving a chapter raises served by one and drops that row, which shifts every
+      -- later row's position down by one, so the sum is unchanged. Ranking on position
+      -- alone let a series keep turn 0 forever; ranking on served alone let a series that
+      -- took a partial block take a full one straight after, so Justice for the Villainess
+      -- got 38 chapters in what was meant to be a turn of 25.
+      ORDER BY (q.served + q.idx) / ${block}, q.title, q.chapter_number
       ${limit ? `LIMIT ${Number(limit)}` : ""}`)).rows;
 }
 

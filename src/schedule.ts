@@ -60,6 +60,21 @@ export async function checkStalled(): Promise<number> {
   // changed while we were watching; on a library where 27 of 39 series were already
   // quiet before this existed, alerting on all of them at once is noise that teaches
   // you to ignore the channel.
+  // A series the check no longer considers keeps whatever flag it was last given, and
+  // nothing would ever revisit it. Clear those first, or excluding a series from the rule
+  // leaves it labelled by a rule it is no longer subject to.
+  const cleared = await p.query(
+    `UPDATE series SET stalled_since = NULL, stall_alerted_at = NULL
+      WHERE stalled_since IS NOT NULL AND (
+        muted OR status = 'COMPLETED'
+        OR NOT EXISTS (SELECT 1 FROM series_binding b
+                        WHERE b.series_id = series.id AND b.role = 'primary')
+        OR COALESCE((SELECT max(c.uploaded_at) FROM chapter c WHERE c.series_id = series.id),
+                    now()) < '1995-01-01')`);
+  if ((cleared.rowCount ?? 0) > 0) {
+    console.log(`  cleared the quiet flag on ${cleared.rowCount} series the rule no longer covers`);
+  }
+
   const seen = (await p.query<{ value: string }>(
     "SELECT value FROM settings WHERE key = 'stall_baseline_at'")).rows[0];
   const baselining = !seen;
@@ -67,6 +82,14 @@ export async function checkStalled(): Promise<number> {
     `SELECT s.id, s.title, max(c.uploaded_at)::text AS last, s.stall_alerted_at::text AS alerted
        FROM series s LEFT JOIN chapter c ON c.series_id = s.id
       WHERE NOT s.muted AND s.status <> 'COMPLETED'
+        -- A source that reports no upload date gives us the epoch, and a series whose
+        -- newest chapter looks like 1970 was flagged as dead when the truth is the source
+        -- did not say. Saving 80,000 Gold was quiet for that reason alone.
+        AND (c.uploaded_at IS NULL OR c.uploaded_at > '1995-01-01')
+        -- Nothing is looking for chapters when nothing is bound, so silence is not
+        -- evidence of anything. An imported folder is not a series that went quiet.
+        AND EXISTS (SELECT 1 FROM series_binding b
+                     WHERE b.series_id = s.id AND b.role = 'primary')
       GROUP BY s.id, s.title, s.stall_alerted_at`)).rows;
 
   let flagged = 0;

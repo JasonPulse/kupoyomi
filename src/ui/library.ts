@@ -67,7 +67,9 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
                      : `<div class="noimg">no cover</div>`}
       ${r.wanted > 0 ? `<span class="flag">+${r.wanted}</span>`
         : r.unbound && !r.muted ? `<span class="flag bad">no source</span>`
-        : r.stalled_since && !r.muted ? `<span class="flag">quiet</span>` : ""}
+        : r.stalled_since && !r.muted
+          ? `<span class="flag" title="no new chapter in a while, noticed automatically -- not something you set">quiet</span>`
+          : ""}
       <div class="pb"><i style="width:${pct(r)}%"></i></div>
       <div class="t">${esc(r.title)}</div>
       <div class="s"><span>${r.held} ch</span><span>${esc(r.source ?? "no source")}</span></div>

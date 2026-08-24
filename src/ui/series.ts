@@ -41,6 +41,7 @@ export async function seriesPage(id: number): Promise<string> {
     .reduce<number | null>((m, r) => Math.max(m ?? -Infinity, Number(r.chapter_number)) , null);
 
   const held = chapters.map((c) => Number(c.chapter_number));
+  const newestUpload = chapters.map((c) => c.uploaded_at).filter((d): d is string => !!d).sort().at(-1) ?? null;
   // findGaps owns this. The page used to compute it again, so the two could disagree and
   // did: only one of them knew a decimal top chapter should raise the ceiling.
   const gaps = (await findGaps(id)).missing;
@@ -99,7 +100,7 @@ export async function seriesPage(id: number): Promise<string> {
          s.status && s.status !== "UNKNOWN" && s.status !== "COMPLETED" ? ` <span class="badge">${esc(s.status.toLowerCase())}</span>` : ""}</div>
        <div class="meta">${chapters.length} chapters, ${fmt(held.at(-1) ?? null)}&ndash;${fmt(held[0] ?? null)}
          &middot; folder <span class="dim">${esc(s.folder)}</span>${
-         s.stalled_since ? ' &middot; <span class="warn">gone quiet</span>' : ""}</div>
+         ""}</div>
        ${s.description ? `<div class="syn">${esc(s.description.slice(0, 1400))}</div>` : '<div class="syn dim">no synopsis yet</div>'}
        </div></div>
        <table style="margin-top:12px" id="bindings">
@@ -191,6 +192,11 @@ export async function seriesPage(id: number): Promise<string> {
        </form>`}
      </div>`}
      <div class="card"><div class="title">Updates</div>
+       ${!s.stalled_since ? "" : `<div class="meta" style="margin:0 0 9px">
+         <span class="warn">No new chapter since ${esc(ago(newestUpload, today))}.</span>
+         Flagged automatically after ${process.env["STALL_DAYS"] ?? 21} days of silence, so this is
+         something noticed rather than something you set. Either the series is between volumes, or
+         its source stopped carrying it and it wants a different one.</div>`}
        <div class="actions" style="margin:0">
          <form method="post" action="/series/${id}/mute">
            <button class="weak" type="submit">${s.muted ? "start checking again" : "stop getting updates"}</button></form>

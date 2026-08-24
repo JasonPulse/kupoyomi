@@ -676,3 +676,54 @@ test("a forced refresh replaces a cover, and an unforced one does not", { skip: 
 
   await p.query("DELETE FROM series WHERE id = $1", [sid]);
 });
+
+/**
+ * What counts as a series having gone quiet.
+ *
+ * The flag is an observation, not a setting, and it was being made on two kinds of series
+ * it should never apply to. A source that reports no upload date hands back the epoch, so
+ * Saving 80,000 Gold looked like its newest chapter was from 1970. And a series with no
+ * source has nothing looking for chapters at all, so silence proves nothing: every folder
+ * imported today was flagged within a day of arriving.
+ */
+test("quiet is not claimed for an unknown date or an unbound series", { skip: !haveDb }, async () => {
+  const { checkStalled } = await import("../src/schedule.js");
+  const p = db();
+  const titles = ["Quiet Epoch Series", "Quiet Unbound Series", "Quiet Genuine Series"];
+  for (const t of titles) await p.query("DELETE FROM series WHERE title = $1", [t]);
+
+  const mk = async (title: string, uploaded: string | null, bind: boolean): Promise<number> => {
+    const r = await p.query<{ id: number }>(
+      "INSERT INTO series (title, folder, stalled_since) VALUES ($1,$1, now()) RETURNING id", [title]);
+    const id = r.rows[0]!.id;
+    await p.query(
+      "INSERT INTO chapter (series_id, chapter_number, file_path, uploaded_at) VALUES ($1,1,$2,$3)",
+      [id, `/nowhere/${id}.cbz`, uploaded]);
+    if (bind) {
+      await p.query(
+        `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
+         VALUES ($1,'s','S',0,'primary')`, [id]);
+    }
+    return id;
+  };
+  // The epoch is what a source hands back when it does not know.
+  const epoch = await mk(titles[0]!, "1970-01-21", true);
+  // No source: nothing is looking, so nothing can have stopped.
+  const unbound = await mk(titles[1]!, "2020-01-01", false);
+  // Genuinely stale, with a source that could have published and did not.
+  const genuine = await mk(titles[2]!, "2024-01-01", true);
+
+  // The baseline has to exist or the first pass stays silent by design.
+  await p.query(
+    "INSERT INTO settings (key, value) VALUES ('stall_baseline_at', now()::text) ON CONFLICT (key) DO NOTHING");
+  await checkStalled();
+
+  const flag = async (id: number): Promise<boolean> => (await p.query<{ n: string | null }>(
+    "SELECT stalled_since::text AS n FROM series WHERE id = $1", [id])).rows[0]?.n !== null;
+
+  assert.equal(await flag(epoch), false, "an unknown upload date is not a stale one");
+  assert.equal(await flag(unbound), false, "a series with no source cannot have gone quiet");
+  assert.equal(await flag(genuine), true, "and a genuinely stale series is still flagged");
+
+  for (const t of titles) await p.query("DELETE FROM series WHERE title = $1", [t]);
+});

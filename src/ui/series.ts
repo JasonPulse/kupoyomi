@@ -6,8 +6,9 @@ import { findGaps } from "../gaps.js";
 export async function seriesPage(id: number): Promise<string> {
   const p = db();
   const today = (await p.query<{ d: string }>("SELECT current_date::text AS d")).rows[0]?.d ?? "";
-  const s = (await p.query<{ id: number; title: string; folder: string; status: string; muted: boolean; stalled_since: string | null; description: string | null; cover_path: string | null }>(
-    "SELECT id, title, folder, status, muted, stalled_since::text, description, cover_path FROM series WHERE id = $1", [id])).rows[0];
+  const s = (await p.query<{ id: number; title: string; folder: string; status: string; muted: boolean; stalled_since: string | null; description: string | null; cover_path: string | null; take_splits: boolean }>(
+    `SELECT id, title, folder, status, muted, stalled_since::text, description, cover_path,
+            take_splits FROM series WHERE id = $1`, [id])).rows[0];
   if (!s) return page("library", "not found", '<div class="card">no such series</div>');
 
   const bindings = (await p.query<{ id: number; source_name: string; source_url: string | null; role: string; last_checked_at: string | null }>(
@@ -198,6 +199,16 @@ export async function seriesPage(id: number): Promise<string> {
          so it is an observation and not something you set. Either the series is between volumes, or
          its source stopped carrying it and it wants a different one.
          ${process.env["NOTIFY_URL"] ? "" : "Nothing is notified: NOTIFY_URL is unset, so the flag is recorded and no alert is sent."}</div>`}
+       <div class="actions" style="margin:0 0 9px">
+         <form method="post" action="/series/${id}/splits">
+           <button class="weak" type="submit">${s.take_splits ? "whole chapters only" : "take part-numbered chapters"}</button></form>
+         <span class="hint">${s.take_splits
+           ? "Taking 25.1 and 25.2 as well as 25. Right when a source publishes nothing else, which "
+             + "is why this series is set that way."
+           : "Whole chapters only. A decimal is nearly always one chapter split by a release group, so "
+             + "taking both means reading the same pages twice. Turn it on if this source only "
+             + "publishes halves, or the series will stop updating."}</span>
+       </div>
        <div class="actions" style="margin:0">
          <form method="post" action="/series/${id}/mute">
            <button class="weak" type="submit">${s.muted ? "start checking again" : "stop getting updates"}</button></form>

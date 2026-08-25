@@ -727,3 +727,49 @@ test("quiet is not claimed for an unknown date or an unbound series", { skip: !h
 
   for (const t of titles) await p.query("DELETE FROM series WHERE title = $1", [t]);
 });
+
+/**
+ * The whole-chapters rule, and the series it would break.
+ *
+ * 25.1 and 25.2 are one chapter split by a release group, so taking both means reading the
+ * same pages twice, and that is true of nearly every source. Kumo Desu ga, Nani ka is not:
+ * it holds 170 chapters of which 153 are halves, in unbroken .1/.2 pairs from chapter 5 to
+ * 80, with no whole chapter to take instead. A single global rule would stop it updating
+ * entirely, so the exception is per series and set from what a series already holds.
+ */
+test("a series whose source only publishes halves keeps taking them", { skip: !haveDb }, async () => {
+  const p = db();
+  const NORMAL = "Whole Numbered Series", HALVES = "Half Numbered Series";
+  for (const t of [NORMAL, HALVES]) await p.query("DELETE FROM series WHERE title = $1", [t]);
+
+  const mk = async (title: string, numbers: number[]): Promise<number> => {
+    const r = await p.query<{ id: number }>(
+      "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [title]);
+    const id = r.rows[0]!.id;
+    for (const n of numbers) {
+      await p.query("INSERT INTO chapter (series_id, chapter_number, file_path) VALUES ($1,$2,$3)",
+        [id, n, `/nowhere/${id}-${n}.cbz`]);
+    }
+    return id;
+  };
+  const normal = await mk(NORMAL, [1, 2, 3, 4, 5, 5.5]);
+  const halves = await mk(HALVES, [1.1, 1.2, 2.1, 2.2, 3.1, 3.2, 4]);
+
+  // The migration's rule: more part-numbered chapters than whole ones means the source
+  // numbers in halves and always did.
+  await p.query(
+    `UPDATE series SET take_splits = true WHERE id IN (
+       SELECT series_id FROM chapter GROUP BY series_id
+        HAVING count(*) FILTER (WHERE chapter_number <> trunc(chapter_number))
+             > count(*) FILTER (WHERE chapter_number = trunc(chapter_number)))`);
+
+  const flag = async (id: number): Promise<boolean> => (await p.query<{ t: boolean }>(
+    "SELECT take_splits AS t FROM series WHERE id = $1", [id])).rows[0]!.t;
+
+  assert.equal(await flag(normal), false,
+    "one side story among five whole chapters is not a source that numbers in halves");
+  assert.equal(await flag(halves), true,
+    "six halves against one whole chapter is, and the rule must not stop it updating");
+
+  for (const t of [NORMAL, HALVES]) await p.query("DELETE FROM series WHERE title = $1", [t]);
+});

@@ -10,7 +10,7 @@ import { chapterFilename } from "./remap.js";
 /** Suwayomi's page proxy lives beside the graphql endpoint. */
 const httpBase = (): string => config.suwayomiUrl.replace(/\/api\/graphql\/?$/, "");
 
-type Binding = { id: number; series_id: number; source_id: string; source_name: string; source_url: string | null; title: string; folder: string };
+type Binding = { id: number; series_id: number; source_id: string; source_name: string; source_url: string | null; title: string; folder: string; take_splits: boolean };
 
 /**
  * Records every chapter the bound source offers that the ledger does not hold.
@@ -72,7 +72,9 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
     // Whole chapters only. A decimal is nearly always one chapter split by a release
     // group, so 25.1 and 25.2 are chapter 25 twice and reading it means reading the same
     // pages again. Set FETCH_WHOLE_ONLY=false to take them.
-    const wholeOnly = (process.env["FETCH_WHOLE_ONLY"] ?? "true") !== "false";
+    // Global rule, per-series exception. A source that publishes only halves would
+    // otherwise stop delivering entirely.
+    const wholeOnly = (process.env["FETCH_WHOLE_ONLY"] ?? "true") !== "false" && !b.take_splits;
     const offered2 = wholeOnly ? offeredAll.filter((n) => Number.isInteger(n)) : offeredAll;
     const skippedSplits = offeredAll.length - offered2.length;
     if (dropped.length > 0) {

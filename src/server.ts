@@ -469,6 +469,11 @@ export async function serve(): Promise<void> {
           if (chapter) await setProgressUpTo(Number(read[1]), chapter);
           return `/series/${read[1]}`;
         }
+        const splits = /^\/series\/(\d+)\/splits$/.exec(path);
+        if (splits) {
+          await db().query("UPDATE series SET take_splits = NOT take_splits WHERE id = $1", [Number(splits[1])]);
+          return `/series/${splits[1]}`;
+        }
         const mute = /^\/series\/(\d+)\/mute$/.exec(path);
         if (mute) {
           const sid = Number(mute[1]);

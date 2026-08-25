@@ -3,12 +3,16 @@ import { esc, page } from "./layout.js";
 import { fmt, ago } from "../held.js";
 import { findGaps } from "../gaps.js";
 
-export async function seriesPage(id: number): Promise<string> {
+export async function seriesPage(id: number, said?: string): Promise<string> {
   const p = db();
   const today = (await p.query<{ d: string }>("SELECT current_date::text AS d")).rows[0]?.d ?? "";
-  const s = (await p.query<{ id: number; title: string; folder: string; status: string; muted: boolean; stalled_since: string | null; description: string | null; cover_path: string | null; take_splits: boolean }>(
+  const s = (await p.query<{ id: number; title: string; folder: string; status: string; muted: boolean; stalled_since: string | null; description: string | null; cover_path: string | null; take_splits: boolean; ver: string }>(
     `SELECT id, title, folder, status, muted, stalled_since::text, description, cover_path,
-            take_splits FROM series WHERE id = $1`, [id])).rows[0];
+            take_splits,
+            -- Stamped into the cover url so a replaced cover is fetched rather than
+            -- served from cache for the next hour.
+            COALESCE(extract(epoch from metadata_at)::bigint, 0)::text AS ver
+       FROM series WHERE id = $1`, [id])).rows[0];
   if (!s) return page("library", "not found", '<div class="card">no such series</div>');
 
   const bindings = (await p.query<{ id: number; source_name: string; source_url: string | null; role: string; last_checked_at: string | null }>(
@@ -92,9 +96,11 @@ export async function seriesPage(id: number): Promise<string> {
          .hero img{float:left;width:112px;height:160px;margin:0 12px 6px 0}
          .hero .syn{font-size:12.5px;white-space:pre-wrap;overflow-wrap:anywhere}
        }</style>
+     ${said ? `<div class="card" style="min-height:0;padding:6px 4px">
+       <div class="meta"><b>${esc(said)}</b></div></div>` : ""}
      <div class="card">
        <div class="hero">
-       ${s.cover_path ? `<img src="/series/${id}/cover" alt="">` : `<img alt="">`}
+       ${s.cover_path ? `<img src="/series/${id}/cover?v=${s.ver}" alt="">` : `<img alt="">`}
        <div style="min-width:0">
        <div class="title">${esc(s.title)}${s.muted ? ' <span class="badge">muted</span>' : ""}${
          s.status === "COMPLETED" ? ' <span class="badge">finished</span>' : ""}${

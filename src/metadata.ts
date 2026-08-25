@@ -1,4 +1,5 @@
-import { writeFileSync, mkdirSync, renameSync, existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, renameSync, existsSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { gql } from "./suwayomi.js";
@@ -77,10 +78,20 @@ async function localMetadata(
         // The best-shaped of the first few pages rather than simply the first. On a
         // webtoon every page is one long strip, and its title panel is usually the one
         // page shaped anything like a cover.
+        //
+        // When forcing, the page currently in use is skipped. Otherwise the scoring is
+        // deterministic and pressing refresh rewrote the identical bytes, which is a
+        // button that cannot do anything however many times it is pressed.
+        let current: string | null = null;
+        if (opts.force) {
+          try { current = createHash("sha1").update(readFileSync(`${dir}/cover.jpg`)).digest("hex"); }
+          catch { /* no cover yet, so nothing to avoid */ }
+        }
         let best: Buffer | null = null;
         let bestScore = Infinity;
-        for (const page of pageEntries(entries).slice(0, 8)) {
+        for (const page of pageEntries(entries).slice(0, 12)) {
           const data = await readEntry(first.file_path, page);
+          if (current && createHash("sha1").update(data).digest("hex") === current) continue;
           const score = coverScore(imageSize(data));
           if (score < bestScore) { bestScore = score; best = data; }
           if (bestScore < 0.35) break;                   // close enough to a page shape
@@ -112,7 +123,7 @@ async function localMetadata(
 
 export async function refreshMetadata(
   seriesId: number, opts: { force?: boolean } = {},
-): Promise<{ cover: boolean; description: boolean }> {
+): Promise<{ cover: boolean; description: boolean; changed?: boolean; note?: string }> {
   const p = db();
   const s = (await p.query<{ title: string; folder: string }>(
     "SELECT title, folder FROM series WHERE id = $1", [seriesId])).rows[0];

@@ -6,7 +6,7 @@ type Row = {
   id: number; title: string; status: string; muted: boolean; unbound: boolean;
   held: number; lo: string | null; hi: string | null;
   wanted: number; failed: number; source: string | null;
-  last_upload: string | null; stalled_since: string | null; cover_path: string | null;
+  last_upload: string | null; stalled_since: string | null; cover_path: string | null; ver: string;
 };
 
 const EXTRA = `
@@ -38,6 +38,7 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
             min(c.chapter_number) AS lo, max(c.chapter_number) AS hi,
             max(c.uploaded_at)::date::text AS last_upload,
             s.stalled_since::text AS stalled_since,
+            COALESCE(extract(epoch from s.metadata_at)::bigint, 0)::text AS ver,
             (SELECT b.source_name FROM series_binding b
               WHERE b.series_id = s.id AND b.role = 'primary') AS source,
             (SELECT count(*)::int FROM wanted w
@@ -63,7 +64,7 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
   // Framed on the outside of the art: parchment panel, dark cover tiles inside it.
   const grid = news("", `<div class="lib">${rows.map((r) => `
     <a class="lc" href="/series/${r.id}">
-      ${r.cover_path ? `<img loading="lazy" src="/series/${r.id}/cover" alt="">`
+      ${r.cover_path ? `<img loading="lazy" src="/series/${r.id}/cover?v=${r.ver}" alt="">`
                      : `<div class="noimg">no cover</div>`}
       ${r.wanted > 0 ? `<span class="flag">+${r.wanted}</span>`
         : r.unbound && !r.muted ? `<span class="flag bad">no source</span>`

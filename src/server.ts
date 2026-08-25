@@ -1,5 +1,13 @@
 import { createServer } from "node:http";
 import { db, migrate } from "./db.js";
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+
+/** Content hash of a file, or null if it cannot be read. Used to tell a refresh that
+ *  changed something from one that legitimately did not. */
+const hashFile = (p: string): string | null => {
+  try { return createHash("sha1").update(readFileSync(p)).digest("hex"); } catch { return null; }
+};
 import { installedExtensions, installExtension, serverAbout, fetchExtensionIndex } from "./suwayomi.js";
 import { libraryPage } from "./ui/library.js";
 import { addSeries } from "./ui/search.js";
@@ -357,7 +365,7 @@ export async function serve(): Promise<void> {
       const rem = /^\/series\/(\d+)\/remove$/.exec(path);
       if (rem) return html(confirmRemovalPage(Number(rem[1])));
       const m = /^\/series\/(\d+)$/.exec(path);
-      if (m) return html(seriesPage(Number(m[1])));
+      if (m) return html(seriesPage(Number(m[1]), url.searchParams.get("said") ?? undefined));
     }
 
     if (req.method === "POST") {
@@ -420,8 +428,28 @@ export async function serve(): Promise<void> {
           return `/series/${sid}`;
         }
         const meta = /^\/series\/(\d+)\/metadata$/.exec(path);
-        // Pressing the button means "give me a different answer", so it forces.
-        if (meta) { await refreshMetadata(Number(meta[1]), { force: true }); return `/series/${meta[1]}`; }
+        // Pressing the button means "give me a different answer", so it forces. And it
+        // reports back: a refresh that legitimately finds the same image looked exactly
+        // like one that failed, which is why the button felt dead.
+        if (meta) {
+          const sid = Number(meta[1]);
+          const before = (await db().query<{ p: string | null }>(
+            "SELECT cover_path AS p FROM series WHERE id = $1", [sid])).rows[0]?.p ?? null;
+          const beforeHash = before ? hashFile(before) : null;
+          let note: string;
+          try {
+            const got = await refreshMetadata(sid, { force: true });
+            const after = (await db().query<{ p: string | null }>(
+              "SELECT cover_path AS p FROM series WHERE id = $1", [sid])).rows[0]?.p ?? null;
+            const afterHash = after ? hashFile(after) : null;
+            note = beforeHash !== afterHash ? "cover replaced"
+              : got.cover ? "same image again: this is the best the source and the files offer, so use pick a cover"
+              : "no cover found at all";
+          } catch (e) {
+            note = `refresh failed: ${e instanceof Error ? e.message.slice(0, 90) : String(e)}`;
+          }
+          return `/series/${sid}?said=${encodeURIComponent(note)}`;
+        }
         if (path === "/queue/retry") {
           const { retryFailed } = await import("./fetch.js");
           await retryFailed();

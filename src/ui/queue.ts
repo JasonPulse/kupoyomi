@@ -23,6 +23,10 @@ export async function queuePage(): Promise<string> {
     <td>ch ${fmt(r.chapter_number)}</td>
     <td class="${r.state === "failed" ? (r.attempts >= maxAttempts ? "bad" : "warn") : "dim"}">${esc(r.state)}${
       r.attempts > 0 ? ` <span class="dim">(${r.attempts})</span>` : ""}</td>
+    <td>${r.state === "failed" ? `<form method="post" action="/queue/retry">
+      <input type="hidden" name="series" value="${r.series_id}">
+      <input type="hidden" name="chapter" value="${esc(r.chapter_number)}">
+      <button class="weak" type="submit" title="try this one now, ignoring the wait">retry</button></form>` : ""}</td>
     <td class="dim" style="font-size:11px">${esc((r.last_error ?? "").slice(0, 90))}${
       // A failed row that is waiting says so, because otherwise it reads as abandoned.
       r.wait_min && r.wait_min > 0
@@ -33,7 +37,7 @@ export async function queuePage(): Promise<string> {
     `${stuck.length > 0 ? `<div class="card"><div class="title bad">${stuck.length} chapters have given up after 4 attempts</div>
        <div class="meta">These are not retried automatically. Usually the source stopped carrying the chapter,
        or its numbering changed.</div></div>` : ""}
-     ${news("Queue", `<table><tr><th>series</th><th>chapter</th><th>state</th><th>last error</th></tr>
-       ${body || '<tr><td colspan="4" class="dim">nothing queued</td></tr>'}</table>
+     ${news("Queue", `<table><tr><th>series</th><th>chapter</th><th>state</th><th></th><th>last error</th></tr>
+       ${body || '<tr><td colspan="5" class="dim">nothing queued</td></tr>'}</table>
        ${rows.length >= 500 ? '<div class="dim" style="margin-top:8px">showing the first 500</div>' : ""}`)}`);
 }

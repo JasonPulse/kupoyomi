@@ -195,12 +195,19 @@ export async function reclaimStuck(olderThanMinutes = 0): Promise<number> {
  * afternoon left chapters permanently dead with no way back short of editing the database.
  * This is that way back, for one series or the whole library.
  */
-export async function retryFailed(seriesId?: number): Promise<number> {
+export async function retryFailed(seriesId?: number, chapter?: string): Promise<number> {
   const max = Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6));
-  const r = await db().query(
-    `UPDATE wanted SET attempts = 0, retry_after = NULL, last_error = NULL, state = 'pending'
-      WHERE state = 'failed' AND attempts >= $1 ${seriesId ? "AND series_id = $2" : ""}`,
-    seriesId ? [max, seriesId] : [max]);
+  // One named chapter is a deliberate "try this now", so it ignores both the attempt limit
+  // and the remaining backoff. Waiting six hours is the right default and the wrong answer
+  // to somebody standing there having just fixed the source.
+  const r = chapter !== undefined && seriesId !== undefined
+    ? await db().query(
+        `UPDATE wanted SET attempts = 0, retry_after = NULL, last_error = NULL, state = 'pending'
+          WHERE series_id = $1 AND chapter_number = $2 AND state <> 'done'`, [seriesId, chapter])
+    : await db().query(
+        `UPDATE wanted SET attempts = 0, retry_after = NULL, last_error = NULL, state = 'pending'
+          WHERE state = 'failed' AND attempts >= $1 ${seriesId ? "AND series_id = $2" : ""}`,
+        seriesId ? [max, seriesId] : [max]);
   const n = r.rowCount ?? 0;
   console.log(`${n} chapter${n === 1 ? "" : "s"} put back in the queue`);
   return n;

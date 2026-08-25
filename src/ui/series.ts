@@ -68,6 +68,11 @@ export async function seriesPage(id: number, said?: string): Promise<string> {
     : wanted.map((w) => `<tr>
         <td>ch ${fmt(w.chapter_number)}</td>
         <td class="${w.state === "failed" ? "bad" : "warn"}">${esc(w.state)}${w.attempts > 0 ? ` (${w.attempts} tries)` : ""}</td>
+        <td>${w.state === "failed" ? `<form method="post" action="/queue/retry">
+          <input type="hidden" name="series" value="${id}">
+          <input type="hidden" name="chapter" value="${esc(w.chapter_number)}">
+          <input type="hidden" name="back" value="series">
+          <button class="weak" type="submit" title="try this one now, ignoring the wait">retry</button></form>` : ""}</td>
         <td class="dim" style="font-size:11px">${esc((w.last_error ?? "").slice(0, 80))}</td></tr>`).join("");
 
   const chapRows = chapters.slice(0, 400).map((c) => {
@@ -232,7 +237,7 @@ export async function seriesPage(id: number, said?: string): Promise<string> {
          + `</div>`}
      </div>
      <div class="card"><div class="title">Queue</div>
-       <table><tr><th>chapter</th><th>state</th><th>last error</th></tr>${wantRows}</table></div>
+       <table><tr><th>chapter</th><th>state</th><th></th><th>last error</th></tr>${wantRows}</table></div>
      <script>
      document.querySelectorAll('#bindings tr[data-binding]').forEach(tr => {
        fetch('/api/binding/' + tr.dataset.binding).then(r => r.json()).then(d => {

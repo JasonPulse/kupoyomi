@@ -468,8 +468,10 @@ export async function serve(): Promise<void> {
         }
         if (path === "/queue/retry") {
           const { retryFailed } = await import("./fetch.js");
-          await retryFailed();
-          return "/queue";
+          const sid = Number(form.get("series"));
+          const ch = form.get("chapter");
+          await retryFailed(Number.isInteger(sid) && sid > 0 ? sid : undefined, ch ?? undefined);
+          return form.get("back") === "series" && Number.isInteger(sid) ? `/series/${sid}` : "/queue";
         }
         const setCover = /^\/series\/(\d+)\/cover$/.exec(path);
         if (setCover) {

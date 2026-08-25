@@ -278,3 +278,28 @@ test("a chapter that has given up stays out until it is put back", { skip: !have
 
   await p.query("UPDATE wanted SET state='pending', attempts=0, retry_after=NULL WHERE series_id=$1", [id]);
 });
+
+test("retrying one chapter ignores the wait and the attempt limit", { skip: !haveDb }, async () => {
+  const { retryFailed } = await import("../src/fetch.js");
+  const p = db();
+  const id = ids.get("Zebra Chronicle")!;
+  await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
+  // Failed, mid-backoff, and short of the limit: a bulk retry would leave it alone.
+  await p.query(
+    `UPDATE wanted SET state='failed', attempts=2, last_error='timeout',
+       retry_after = now() + interval '5 hours' WHERE series_id=$1 AND chapter_number=1`, [id]);
+
+  const present = async (): Promise<boolean> =>
+    (await nextWanted(undefined, 25)).some((r) => r.series_id === id && Number(r.chapter_number) === 1);
+  assert.equal(await present(), false, "it is waiting, so it is not a candidate");
+  assert.equal(await retryFailed(id), 0, "a bulk retry only takes chapters that gave up");
+
+  assert.equal(await retryFailed(id, "1.0000"), 1, "naming it retries it");
+  assert.equal(await present(), true, "and it is a candidate immediately, not in five hours");
+  const row = (await p.query<{ attempts: number; retry_after: string | null }>(
+    "SELECT attempts, retry_after::text AS retry_after FROM wanted WHERE series_id=$1 AND chapter_number=1", [id])).rows[0]!;
+  assert.equal(row.attempts, 0);
+  assert.equal(row.retry_after, null, "the wait is cleared, or it would not actually be tried now");
+
+  await p.query("UPDATE wanted SET state='pending', attempts=0, retry_after=NULL WHERE series_id=$1", [id]);
+});

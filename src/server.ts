@@ -1,7 +1,23 @@
 import { createServer } from "node:http";
 import { db, migrate } from "./db.js";
-import { readFileSync } from "node:fs";
+import { readFileSync, openSync, readSync, closeSync } from "node:fs";
 import { createHash } from "node:crypto";
+
+/** The real type of an image file, from its first bytes. A source thumbnail may be WebP
+ *  or PNG while the file on disk is called cover.jpg, and telling a client it is JPEG when
+ *  it is not is how an image silently fails to render. */
+const sniffImage = (p: string): string => {
+  try {
+    const fd = openSync(p, "r");
+    const head = Buffer.alloc(12);
+    readSync(fd, head, 0, 12, 0);
+    closeSync(fd);
+    if (head.toString("ascii", 0, 4) === "RIFF" && head.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+    if (head[0] === 0x89 && head.toString("ascii", 1, 4) === "PNG") return "image/png";
+    if (head.toString("ascii", 0, 3) === "GIF") return "image/gif";
+  } catch { /* fall through to jpeg */ }
+  return "image/jpeg";
+};
 
 /** Content hash of a file, or null if it cannot be read. Used to tell a refresh that
  *  changed something from one that legitimately did not. */
@@ -245,7 +261,7 @@ export async function serve(): Promise<void> {
             "SELECT cover_path FROM series WHERE id = $1", [Number(parts[1])]);
           const cp = r.rows[0]?.cover_path;
           if (!cp) { res.writeHead(404); res.end(); return; }
-          res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "public, max-age=3600" });
+          res.writeHead(200, { "content-type": sniffImage(cp), "cache-control": "public, max-age=3600" });
           createReadStream(cp).on("error", () => { res.writeHead(404); res.end(); }).pipe(res);
           return;
         }
@@ -354,7 +370,7 @@ export async function serve(): Promise<void> {
           .then((r) => {
             const p2 = r.rows[0]?.cover_path;
             if (!p2) { res.writeHead(404); res.end(); return; }
-            res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "public, max-age=3600" });
+            res.writeHead(200, { "content-type": sniffImage(p2), "cache-control": "public, max-age=3600" });
             createReadStream(p2).on("error", () => { res.writeHead(404); res.end(); }).pipe(res);
           })
           .catch(() => { res.writeHead(500); res.end(); });

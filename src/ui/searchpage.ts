@@ -50,7 +50,15 @@ function relevance(title) {
   if (words.length && hits === words.length) return 3;
   return 4;
 }
+const shortTarget = (window.TARGET_TITLE || '').slice(0, 30);
 function render(g) {
+  // The comparison numbers are against whichever series the page is working for. In
+  // target mode that is the same series for every card, so the columns are labelled with
+  // it rather than left to look like facts about the card's own work.
+  const attachTo = window.TARGET || g.have;
+  const cmp = !!attachTo;
+  const vsLabel = window.TARGET ? ' (against '+shortTarget+')' : '';
+  const sameAsTarget = norm(g.title) === norm(window.TARGET_TITLE || '');
   let card = document.getElementById('g-'+g.key);
   if (!card) {
     card = document.createElement('div');
@@ -92,16 +100,18 @@ function render(g) {
       '<div class="srch-body"><div class="title">'+g.title+
         (g.have ? ' <a class="badge" href="/series/'+g.have+'">in library</a>' : '')+'</div>'+
         (g.have && g.held ? '<div class="meta">you hold <b>'+g.held+'</b> chapters'+
-          (g.heldMax ? ', up to ch '+g.heldMax : '')+'</div>' : '')+
+          (g.heldMax ? ', up to ch '+g.heldMax : '')+'</div>'
+         : window.TARGET ? '<div class="meta dim">columns compare against '+shortTarget+
+           ', not against this title</div>' : '')+
         '<div class="meta">'+best.length+' unique release'+(best.length===1?'':'s')+
           (g.rows.length !== best.length ? ' <span class="dim">('+g.rows.length+' listed in total)</span>' : '')+
           (g.genres && g.genres.length ? ' &middot; '+g.genres.slice(0,5).join(', ') : '')+'</div>'+
         desc+
       '</div></div>' +
     '<table class="srcs"><tr><th>source</th><th>release</th><th>chapters</th>' +
-      (g.have ? '<th title="chapters past your highest -- the reason to switch">new</th>'
-              + '<th title="chapters inside your range that you do not have">fills</th>'
-              + '<th title="chapters you hold that this source does not carry. Costs nothing: the files stay">not carried</th>' : '') +
+      (cmp ? '<th title="chapters past your highest'+vsLabel+'">new</th>'
+           + '<th title="chapters inside your range that you do not have'+vsLabel+'">fills</th>'
+           + '<th title="chapters you hold that this source does not carry. Costs nothing: the files stay">not carried</th>' : '') +
       '<th>latest</th><th></th></tr>' +
     best.map(r => {
       const known = r.chapters !== undefined && r.chapters !== null;
@@ -126,7 +136,7 @@ function render(g) {
           (padded ? '<div class="warn" style="font-size:10.5px">'+r.total+' uploads, so most chapters are here more than once</div>' : '')+
           (odd && !padded ? '<div class="warn" style="font-size:10.5px">most sources say about '+median+'</div>' : '')+
           '</td>' +
-        (g.have ? (function(){
+        (cmp ? (function(){
           const nb = r.newBeyond, fg = r.fillsGaps, nc = r.notCarried;
           const cell = (v, cls) => '<td class="'+(v > 0 ? cls : 'dim')+'">'+
             (v === undefined ? '<span class="dim">-</span>' : v > 0 ? '+'+v : '0')+'</td>';
@@ -146,8 +156,22 @@ function render(g) {
             // The series this belongs to, when it is one already held. Without it the
             // server has only the source's title to go on, and a capital letter or a
             // bracket is enough to make it a second series instead of another source.
-            (g.have ? '<input type="hidden" name="seriesId" value="'+g.have+'">' : '') +
-            '<button type="submit"'+(known||failed?'':' disabled')+'>'+(g.have?'use this':'add')+'</button></form>') +
+            (attachTo ? '<input type="hidden" name="seriesId" value="'+attachTo+'">' : '') +
+            '<button type="submit"'+(known||failed?'':' disabled')+'>'+
+              (window.TARGET ? 'use for '+shortTarget : g.have ? 'use this' : 'add')+
+            '</button></form>' +
+            // A spin-off shares its parent's name, so nothing textual separates "My
+            // Dress-Up Darling XOXO!" from the series being worked on. Attaching it would
+            // put its chapters in the wrong ledger, so the other option is always here.
+            (window.TARGET && !sameAsTarget
+              ? '<form class="addf" method="post" action="/add" style="margin-left:6px">' +
+                '<input type="hidden" name="title" value="'+r.title.replace(/"/g,'&quot;')+'">' +
+                '<input type="hidden" name="sourceId" value="'+r.sourceId+'">' +
+                '<input type="hidden" name="sourceName" value="'+r.sourceName.replace(/"/g,'&quot;')+'">' +
+                '<input type="hidden" name="url" value="'+r.url.replace(/"/g,'&quot;')+'">' +
+                '<button class="weak" type="submit"'+(known||failed?'':' disabled')+
+                ' title="make this its own series instead of attaching it">as new</button></form>'
+              : '')) +
         '</td></tr>';
     }).join('') + '</table>';
 }
@@ -241,13 +265,19 @@ es.addEventListener('hit', e => {
   const h = JSON.parse(e.data);
   const key = mergeKey(workKey(h.title));
   let g = groups.get(key);
-  // window.TARGET wins over a title match: the page was opened to find a source for that
-  // series, so that is what every row on it attaches to.
-  if (!g) { g = { key, title: h.title, thumb: h.thumb, rows: [], have: window.TARGET || window.HAVE[norm(h.title)] }; groups.set(key, g); }
+  // Two different things, conflated once and wrong for it. "have" means this work is in
+  // the library, which only a real title match can establish. "target" means the page was
+  // opened to find a source FOR a series, which is true of the page and not of the card.
+  // No backticks in here: this block is a template literal and one would end it.
+  //
+  // Setting have from TARGET made every card claim the target's holdings: the spin-off
+  // "My Dress-Up Darling XOXO!" reported "in library, you hold 130 chapters" on the
+  // strength of the main series being open.
+  if (!g) { g = { key, title: h.title, thumb: h.thumb, rows: [], have: window.HAVE[norm(h.title)] }; groups.set(key, g); }
   if (!g.thumb && h.thumb) g.thumb = h.thumb;
   // The plainest title represents the work; the tagged ones are its releases.
   if (h.title.length < g.title.length) g.title = h.title;
-  if (!g.have) g.have = window.TARGET || window.HAVE[norm(h.title)];
+  if (!g.have) g.have = window.HAVE[norm(h.title)];
   h.variant = variantOf(h.title);
   g.rows.push(h);
   seen++;
@@ -343,6 +373,7 @@ export async function searchPage(query?: string, seriesId?: number): Promise<str
 
   return page("search", target ? `choosing a source for ${target.title}` : "global search",
     `<style>${EXTRA_CSS}</style>${form}<div id="results"></div>
-     <script>window.HAVE=${JSON.stringify(have)};window.TARGET=${target ? target.id : "null"};</script>
+     <script>window.HAVE=${JSON.stringify(have)};window.TARGET=${target ? target.id : "null"};
+       window.TARGET_TITLE=${JSON.stringify(target ? target.title : "")};</script>
      <script>${CLIENT}</script>`);
 }

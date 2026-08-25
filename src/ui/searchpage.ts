@@ -36,6 +36,20 @@ const RUN_TAG = /^(?:s|season|part|pt|vol|volume|book|arc)\s*\.?\s*\d+$|^\d+(?:s
 const detailQueue = [];
 let active = 0;
 
+// How well a group answers what was typed. Sources answer in whatever order they
+// answer, so "My Dress-Up Darling" arrived fifth behind four titles that merely share a
+// word. CSS order sorts without moving anything, which matters while results stream in.
+function relevance(title) {
+  const a = norm(title), b = norm(q);
+  if (!b) return 5;
+  if (a === b) return 0;
+  if (a.startsWith(b)) return 1;
+  if (a.includes(b)) return 2;
+  const words = b.split(' ').filter(w => w.length > 2);
+  const hits = words.filter(w => a.includes(w)).length;
+  if (words.length && hits === words.length) return 3;
+  return 4;
+}
 function render(g) {
   let card = document.getElementById('g-'+g.key);
   if (!card) {
@@ -44,6 +58,7 @@ function render(g) {
     card.id = 'g-'+g.key;
     el.appendChild(card);
   }
+  card.style.order = relevance(g.title);
   // Most chapters first, then prefer an English release over a translated one.
   const en = r => /english/i.test(r.variant||'') ? 0 : 1;
   const sorted = [...g.rows].sort((a,b)=>(b.chapters??-1)-(a.chapters??-1) || en(a)-en(b));
@@ -90,6 +105,7 @@ function render(g) {
       '<th>latest</th><th></th></tr>' +
     best.map(r => {
       const known = r.chapters !== undefined && r.chapters !== null;
+      const failed = !!r.failed;
       const empty = known && r.chapters === 0;   // one chapter is a real new series, zero is nothing
       const thin = known && r.chapters > 0 && r.chapters < 3;
       const odd = median > 0 && known && r.chapters > 0
@@ -104,7 +120,8 @@ function render(g) {
             : '')+'</td>' +
         '<td class="dim">'+(r.variant || '-')+'</td>' +
         '<td class="'+(empty?'bad':thin||odd?'warn':known?'rec':'dim')+'">'+
-          (known ? r.chapters : '<span class="spin">checking</span>')+
+          (failed ? '<span class="bad" title="'+String(r.failed).replace(/"/g,'&quot;')+'">?</span>'
+                  : known ? r.chapters : '<span class="spin">checking</span>')+
           (known && r.highest ? '<div class="dim" style="font-size:10.5px">up to ch '+r.highest+'</div>' : '')+
           (padded ? '<div class="warn" style="font-size:10.5px">'+r.total+' uploads, so most chapters are here more than once</div>' : '')+
           (odd && !padded ? '<div class="warn" style="font-size:10.5px">most sources say about '+median+'</div>' : '')+
@@ -130,14 +147,21 @@ function render(g) {
             // server has only the source's title to go on, and a capital letter or a
             // bracket is enough to make it a second series instead of another source.
             (g.have ? '<input type="hidden" name="seriesId" value="'+g.have+'">' : '') +
-            '<button type="submit"'+(known?'':' disabled')+'>'+(g.have?'use this':'add')+'</button></form>') +
+            '<button type="submit"'+(known||failed?'':' disabled')+'>'+(g.have?'use this':'add')+'</button></form>') +
         '</td></tr>';
     }).join('') + '</table>';
 }
 
 function pump() {
-  while (active < 4 && detailQueue.length) {
-    const { key, row } = detailQueue.shift();
+  while (active < 6 && detailQueue.length) {
+    // Best match first. Chapter counts were fetched in arrival order, so the title being
+    // searched for waited behind every loose match that happened to answer sooner and sat
+    // on "checking" while they were all checked.
+    let at = 0;
+    for (let i = 1; i < detailQueue.length; i++) {
+      if (detailQueue[i].rank < detailQueue[at].rank) at = i;
+    }
+    const { key, row } = detailQueue.splice(at, 1)[0];
     active++;
     // When the work is already in the library, ask for the comparison too: what this
     // source offers past what is held, what holes it fills, what it does not carry.
@@ -145,7 +169,12 @@ function pump() {
     // existed at all.
     const g0 = groups.get(key);
     const url = '/api/detail?mangaId='+row.mangaId + (g0 && g0.have ? '&seriesId='+g0.have : '');
-    fetch(url).then(r=>r.json()).then(d => {
+    // Bounded, and a failure has to be visible. row.chapters = null rendered identically
+    // to "not asked yet", so a source that errored or timed out sat on "checking" for as
+    // long as anyone cared to look at it.
+    fetch(url, { signal: AbortSignal.timeout(Number(window.DETAIL_TIMEOUT_MS || 60000)) })
+      .then(r => r.json()).then(d => {
+      if (d && d.error) { row.failed = d.error; render(groups.get(key)); return; }
       row.chapters = d.chapters; row.lastUpload = d.lastUpload;
       row.total = d.total; row.highest = d.highest;
       row.newBeyond = d.newBeyond; row.fillsGaps = d.fillsGaps; row.notCarried = d.notCarried;
@@ -154,7 +183,8 @@ function pump() {
       if (g && (!g.genres || !g.genres.length) && d.genres) g.genres = d.genres;
       if (g && d.held !== undefined) { g.held = d.held; g.heldMax = d.heldMax; }
       render(g);
-    }).catch(()=>{ row.chapters = null; }).finally(()=>{ active--; pump(); });
+    }).catch(e => { row.failed = (e && e.name === 'TimeoutError') ? 'timed out' : 'unreachable';
+      render(groups.get(key)); }).finally(()=>{ active--; pump(); });
   }
 }
 
@@ -222,7 +252,7 @@ es.addEventListener('hit', e => {
   g.rows.push(h);
   seen++;
   render(g);
-  detailQueue.push({ key, row: h });
+  detailQueue.push({ key, row: h, rank: relevance(g.title) });
   pump();
 });
 es.addEventListener('progress', e => {
@@ -234,6 +264,7 @@ es.onerror = () => { es.close(); status.textContent += ' — connection ended'; 
 `;
 
 const EXTRA_CSS = `
+#results{display:flex;flex-direction:column}
 .srch-head{display:flex;gap:16px;margin-bottom:12px;align-items:flex-start}
 .cover{width:190px;height:272px;object-fit:cover;border-radius:4px;background:#242424;flex:0 0 auto}
 .srch-body{min-width:0}

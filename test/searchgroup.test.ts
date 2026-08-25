@@ -64,3 +64,31 @@ test("a short title is never merged by edit distance", () => {
   assert.equal(fns.mergeKey("bleach"), "bleach");
   assert.equal(fns.mergeKey("naruto"), "naruto");
 });
+
+/**
+ * Which card answers what was typed.
+ *
+ * Sources answer in whatever order they answer, so searching "My Dress-Up Darling" put it
+ * fifth behind four titles that merely share a word, and its chapter count was fetched
+ * behind theirs. Relevance decides both the display order and which detail call goes first.
+ */
+// The block reads the query out of location.search itself, so the stub supplies it rather
+// than the harness declaring a second q.
+const relStubs = stubs.replace("location={search:'?q=x'}",
+  "location={search:'?q=' + encodeURIComponent('My Dress-Up Darling')}");
+const rel = new Function(`${relStubs}\n${block.slice(0, upTo)}\nreturn relevance;`)() as (t: string) => number;
+
+test("the title searched for outranks a loose match", () => {
+  assert.equal(rel("My Dress-Up Darling"), 0, "an exact match is first");
+  assert.ok(rel("My Dress-Up Darling: Extra") <= 1, "a title starting with it is next");
+  assert.ok(rel("The My Dress-Up Darling Story") <= 2, "one containing it comes after that");
+  // Shares two words and is a different work.
+  assert.ok(rel("My Darling Is a Dress Maker") > 2,
+    "a title that merely shares words must rank below one that contains the whole phrase");
+  assert.ok(rel("Completely Unrelated Manga") > 3, "and something unrelated is last");
+});
+
+test("ranking is a total order, so ties keep arrival order", () => {
+  // Two loose matches must score the same rather than one jumping the other arbitrarily.
+  assert.equal(rel("Some Other Thing"), rel("Another Thing Entirely"));
+});

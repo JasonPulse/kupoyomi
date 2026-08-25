@@ -432,3 +432,67 @@ export async function importFolder(path: string, title?: string): Promise<number
   console.log(`  it has no source, so nothing will look for new chapters until you choose one`);
   return id;
 }
+
+/**
+ * Part-numbered chapters held alongside the whole chapter they split.
+ *
+ * A decimal is nearly always one chapter divided by a release group, so holding 25, 25.1
+ * and 25.2 means reading chapter 25 twice. Those are redundant and can go.
+ *
+ * The ones where the whole number is NOT held are a different matter and are never
+ * touched here. Checked against three sources, none of them offers the whole chapter at
+ * all: Scumless Oblige has 2.1 and 2.2 and no chapter 2. Deleting those loses the chapter
+ * outright, with nothing to re-fetch, so they are reported and left alone.
+ */
+export async function pruneSplitChapters(opts: { delete?: boolean } = {}): Promise<void> {
+  const p = db();
+  const rows = (await p.query<{ series_id: number; title: string; chapter_number: string; file_path: string; whole_held: boolean }>(
+    `SELECT c.series_id, s.title, c.chapter_number::text, c.file_path,
+            EXISTS (SELECT 1 FROM chapter c2 WHERE c2.series_id = c.series_id
+                     AND c2.chapter_number = trunc(c.chapter_number)) AS whole_held
+       FROM chapter c JOIN series s ON s.id = c.series_id
+      WHERE c.chapter_number <> trunc(c.chapter_number)
+      ORDER BY s.title, c.chapter_number`)).rows;
+
+  const redundant = rows.filter((r) => r.whole_held);
+  const orphan = rows.filter((r) => !r.whole_held);
+  console.log(`${rows.length} part-numbered chapters: ${redundant.length} sit beside the whole chapter, `
+    + `${orphan.length} are the only copy of theirs`);
+
+  if (orphan.length > 0) {
+    const bySeries = new Map<string, number>();
+    for (const o of orphan) bySeries.set(o.title, (bySeries.get(o.title) ?? 0) + 1);
+    console.log(`\nleft alone, because the whole chapter is not held and sources do not offer it:`);
+    for (const [t, n] of [...bySeries.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) {
+      console.log(`  ${String(n).padStart(4)}  ${t.slice(0, 56)}`);
+    }
+    if (bySeries.size > 12) console.log(`  ... and ${bySeries.size - 12} more series`);
+  }
+
+  if (redundant.length === 0) return;
+  let freed = 0, links = 0, gone = 0;
+  for (const r of redundant) {
+    if (!opts.delete) {
+      try { const st = statSync(r.file_path); if (st.nlink > 1) links++; else freed += st.size; } catch { /* counted as zero */ }
+      continue;
+    }
+    try {
+      const st = statSync(r.file_path);
+      if (st.nlink > 1) links++; else freed += st.size;
+      rmSync(r.file_path);
+    } catch { /* the row goes regardless: a missing file is not held */ }
+    await p.query("DELETE FROM chapter WHERE series_id = $1 AND chapter_number = $2",
+      [r.series_id, r.chapter_number]);
+    await p.query("DELETE FROM wanted WHERE series_id = $1 AND chapter_number = $2",
+      [r.series_id, r.chapter_number]);
+    gone++;
+  }
+  const q = opts.delete
+    ? await p.query("DELETE FROM wanted WHERE state <> 'done' AND chapter_number <> trunc(chapter_number)")
+    : { rowCount: 0 };
+  console.log(`\n${opts.delete ? `deleted ${gone}` : `would delete ${redundant.length}`} redundant chapters, `
+    + `${(freed / 1048576).toFixed(0)}MB reclaimable`
+    + (links > 0 ? `, ${links} are hardlinks the legacy folder still holds` : "")
+    + ((q.rowCount ?? 0) > 0 ? `, and cleared ${q.rowCount} from the queue` : ""));
+  if (!opts.delete) console.log("pass --delete to remove them");
+}

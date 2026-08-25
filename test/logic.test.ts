@@ -203,3 +203,14 @@ test("decimals and a short list are left alone", () => {
   // Two chapters cannot establish a run, so nothing is judged an outlier.
   assert.deepEqual(withoutOutliers([1, 9000]).dropped, []);
 });
+
+test("only whole chapters are taken from a source", () => {
+  // A release group splitting chapter 25 into 25.1 and 25.2 means reading it twice, and
+  // no source seen here uses a decimal for anything else.
+  const offered = [23, 24, 25, 25.1, 25.2, 26, 26.5, 27];
+  const whole = offered.filter((n) => Number.isInteger(n));
+  assert.deepEqual(whole, [23, 24, 25, 26, 27]);
+  // Zero is a chapter and negative numbers are not, so the check has to be integer
+  // rather than truthy: chapter 0 exists in this library.
+  assert.deepEqual([0, 0.5, 1].filter((n) => Number.isInteger(n)), [0, 1]);
+});

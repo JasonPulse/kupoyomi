@@ -68,10 +68,20 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
     const offered = (await gql<{ manga: { chapters: { nodes: Array<{ chapterNumber: number | null }> } } }>(
       `{ manga(id:${mangaId}) { chapters { nodes { chapterNumber } } } }`)).manga.chapters.nodes
       .map((c) => c.chapterNumber).filter((n): n is number => n !== null);
-    const { kept: offered2, dropped } = withoutOutliers(offered);
+    const { kept: offeredAll, dropped } = withoutOutliers(offered);
+    // Whole chapters only. A decimal is nearly always one chapter split by a release
+    // group, so 25.1 and 25.2 are chapter 25 twice and reading it means reading the same
+    // pages again. Set FETCH_WHOLE_ONLY=false to take them.
+    const wholeOnly = (process.env["FETCH_WHOLE_ONLY"] ?? "true") !== "false";
+    const offered2 = wholeOnly ? offeredAll.filter((n) => Number.isInteger(n)) : offeredAll;
+    const skippedSplits = offeredAll.length - offered2.length;
     if (dropped.length > 0) {
       console.log(`  ${b.title.slice(0, 40)}: ignoring ${dropped.join(", ")} -- `
         + `${dropped.length === 1 ? "that number is" : "those numbers are"} hundreds above the rest of the run`);
+    }
+    if (skippedSplits > 0) {
+      console.log(`  ${b.title.slice(0, 40)}: skipping ${skippedSplits} part-numbered chapter${
+        skippedSplits === 1 ? "" : "s"}`);
     }
     const held = new Set((await p.query<{ chapter_number: string }>(
       "SELECT chapter_number FROM chapter WHERE series_id = $1", [b.series_id])).rows

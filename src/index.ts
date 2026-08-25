@@ -47,6 +47,7 @@ const usage = `kupoyomi <command>
   link <seriesId> <path> [--ignore]  record that a folder belongs to a series, or does not
   aka <seriesId> <name> [--remove]  another name the series goes by, used to match folders
   prune-folders [--delete]   linked folders whose every chapter is already in the library
+  prune-splits [--delete]    part-numbered chapters held beside the whole chapter they split
   link-obvious [--dry-run]   link every folder whose name is exactly a series' name
   import-folder <path> [title]  make a series from a folder and adopt everything in it
   remove <seriesId> [--files] [--legacy]  delete a series; prints the plan without flags
@@ -206,6 +207,11 @@ const main = async (): Promise<void> => {
       const { importFolder } = await import("./adopt.js");
       const t = process.argv[4];
       await importFolder(path, t && !t.startsWith("--") ? t : undefined);
+      break;
+    }
+    case "prune-splits": {
+      const { pruneSplitChapters } = await import("./adopt.js");
+      await pruneSplitChapters({ delete: process.argv.includes("--delete") });
       break;
     }
     case "prune-folders": {

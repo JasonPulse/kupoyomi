@@ -820,3 +820,57 @@ test("a decimal deleted on purpose does not protect its legacy folder", { skip: 
 
   for (const t of [WHOLE, SPLIT]) await p.query("DELETE FROM series WHERE title = $1", [t]);
 });
+
+/**
+ * Asking for a synopsis must not cost the cover.
+ *
+ * localMetadata answers both questions and writes cover.jpg as a side effect of the first.
+ * refreshMetadata called it whenever EITHER was missing, so a series with good cover art
+ * from its source but no synopsis had that art replaced by a comic page every time the
+ * button was pressed. Three series showed "the first page of the first comic" for that
+ * reason, however often they were refreshed.
+ *
+ * The bound case needs a live source, so it is verified against the deployed instance.
+ * What is asserted here is the rule for a series with no source, where a page is the only
+ * cover available: forcing moves to a different page rather than rewriting the same one,
+ * and the synopsis is filled either way.
+ */
+test("forcing a source-less refresh moves to another page and still fills the synopsis", { skip: !haveDb }, async () => {
+  const { refreshMetadata } = await import("../src/metadata.js");
+  const { buildCbz, comicInfo } = await import("../src/cbz.js");
+  const { mkdirSync: mk, writeFileSync: wf, readFileSync: rf } = await import("node:fs");
+  const p = db();
+  const TITLE = "Cover Cycle Series";
+  await p.query("DELETE FROM series WHERE title = $1", [TITLE]);
+  const s = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [TITLE]);
+  const sid = s.rows[0]!.id;
+
+  const dir = join(libraryRoot, TITLE);
+  mk(dir, { recursive: true });
+  const P1 = jpegOf(1000, 1400, "PAGE-ONE");
+  const P2 = jpegOf(1000, 1400, "PAGE-TWO");
+  const file = join(dir, `${TITLE} - c0001.cbz`);
+  wf(file, buildCbz([
+    { name: "ComicInfo.xml", data: Buffer.from(comicInfo({
+        series: TITLE, number: "1", pageCount: 2, summary: "A real synopsis from the archive." })) },
+    { name: "001.jpg", data: P1 }, { name: "002.jpg", data: P2 },
+  ], new Date("2026-01-01T00:00:00Z")));
+  await p.query("INSERT INTO chapter (series_id, chapter_number, file_path) VALUES ($1,1,$2)", [sid, file]);
+
+  // Page one is the cover, which is the state being complained about.
+  wf(join(dir, "cover.jpg"), P1);
+  await p.query("UPDATE series SET cover_path = $2, description = NULL WHERE id = $1",
+    [sid, join(dir, "cover.jpg")]);
+
+  await refreshMetadata(sid, { force: true });
+
+  const desc = (await p.query<{ description: string | null }>(
+    "SELECT description FROM series WHERE id = $1", [sid])).rows[0]!.description;
+  assert.match(desc ?? "", /real synopsis from the archive/, "the synopsis is filled in");
+  assert.notDeepEqual(rf(join(dir, "cover.jpg")), P1,
+    "forcing must move off the page already in use, or the button cannot do anything");
+  assert.deepEqual(rf(join(dir, "cover.jpg")), P2, "and it takes the next candidate");
+
+  await p.query("DELETE FROM series WHERE id = $1", [sid]);
+});

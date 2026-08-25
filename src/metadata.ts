@@ -57,8 +57,15 @@ export function looksLikeSiteCopy(text: string): boolean {
  * chapter is a cover: it is what the scanlator put there, and it is on disk already.
  */
 async function localMetadata(
-  seriesId: number, folder: string, opts: { force?: boolean } = {},
+  seriesId: number, folder: string,
+  opts: { force?: boolean; wantCover?: boolean; wantDescription?: boolean } = {},
 ): Promise<{ cover: string | null; description: string | null }> {
+  // Asked for separately, because it writes cover.jpg. When a series had a perfectly good
+  // cover from its source but no synopsis, this was called for the synopsis and replaced
+  // the cover with a comic page on the way past. That is why the cover art on these was
+  // "the first page of the first comic" no matter how often refresh was pressed.
+  const wantCover = opts.wantCover !== false;
+  const wantDescription = opts.wantDescription !== false;
   const dir = `${config.libraryRoot}/${folder}`;
   const first = (await db().query<{ file_path: string }>(
     "SELECT file_path FROM chapter WHERE series_id = $1 ORDER BY chapter_number LIMIT 1",
@@ -68,13 +75,13 @@ async function localMetadata(
   // A cover.jpg already sitting in the folder is either ours from a previous run or one
   // komf left behind. Either way it is a real cover, so adopt it rather than redo it --
   // unless the caller is explicitly replacing it, which is the whole point of asking.
-  if (!opts.force && existsSync(`${dir}/cover.jpg`)) cover = `${dir}/cover.jpg`;
+  if (wantCover && !opts.force && existsSync(`${dir}/cover.jpg`)) cover = `${dir}/cover.jpg`;
 
   let description: string | null = null;
   if (first) {
     try {
       const entries = await listEntries(first.file_path);
-      if (!cover) {
+      if (!cover && wantCover) {
         // The best-shaped of the first few pages rather than simply the first. On a
         // webtoon every page is one long strip, and its title panel is usually the one
         // page shaped anything like a cover.
@@ -106,7 +113,7 @@ async function localMetadata(
       }
       // Suwayomi wrote a ComicInfo.xml into most adopted files, and its Summary is the
       // synopsis the source had at download time. Stale beats blank.
-      const ci = entries.find((e) => /^comicinfo\.xml$/i.test(e.name));
+      const ci = wantDescription ? entries.find((e) => /^comicinfo\.xml$/i.test(e.name)) : undefined;
       if (ci) {
         const xml = (await readEntry(first.file_path, ci)).toString("utf8");
         const m = /<Summary>([\s\S]*?)<\/Summary>/i.exec(xml);
@@ -199,7 +206,13 @@ export async function refreshMetadata(
   // leave the series blank when the first page is sitting right there.
   let localDesc: string | null = null;
   if (!coverPath || !d.description) {
-    const local = await localMetadata(seriesId, s.folder, opts.force ? { force: true } : {});
+    const local = await localMetadata(seriesId, s.folder, {
+      ...(opts.force ? { force: true } : {}),
+      // Only what the source failed to provide. Asking for a description must not cost
+      // the cover the source just supplied.
+      wantCover: !coverPath,
+      wantDescription: !d.description,
+    });
     coverPath = coverPath ?? local.cover;
     localDesc = local.description;
   }

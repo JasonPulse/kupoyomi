@@ -108,7 +108,22 @@ export type WantedRow = {
 };
 
 /** The queue's serving order. Separated from the download loop so it can be proven. */
-export async function nextWanted(limit?: number, blockSize?: number): Promise<WantedRow[]> {
+export async function nextWanted(
+  limit?: number, blockSize?: number,
+  /** One named chapter, bypassing the rotation entirely. A manual retry is a request to
+   *  fetch that chapter now, not a request to join a queue. */
+  only?: { seriesId: number; chapter: string },
+): Promise<WantedRow[]> {
+  if (only) {
+    return (await db().query<WantedRow>(
+      `SELECT w.series_id, w.chapter_number, w.binding_id, b.source_id, b.source_name,
+              b.source_url, s.title, s.folder, w.attempts
+         FROM wanted w
+         JOIN series_binding b ON b.id = w.binding_id
+         JOIN series s ON s.id = w.series_id
+        WHERE w.series_id = $1 AND w.chapter_number = $2 AND w.state <> 'done'`,
+      [only.seriesId, only.chapter])).rows;
+  }
   const block = Math.max(1, Number(blockSize ?? process.env["FETCH_BLOCK"] ?? 25));
   const maxAttempts = Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6));
   // Round-robin by block, not one series start to finish.
@@ -146,6 +161,10 @@ export async function nextWanted(limit?: number, blockSize?: number): Promise<Wa
         WHERE w.state IN ('pending','failed','fetching') AND w.attempts < ${maxAttempts}
           -- A row waiting out its backoff is not a candidate yet.
           AND (w.retry_after IS NULL OR w.retry_after <= now())
+          -- Nor is one genuinely in flight. A manual retry runs outside the scheduler, so
+          -- without this a tick could pick the same chapter and download it twice at once.
+          -- Rows left behind by a dead process are cleared by reclaimStuck beforehand.
+          AND NOT (w.state = 'fetching' AND w.started_at > now() - interval '5 minutes')
           -- A muted series is one the owner has told to stop. Its backlog is deleted when
           -- it stops, so this is a backstop against rows arriving by another route.
           AND NOT s.muted
@@ -221,13 +240,15 @@ export async function retryFailed(seriesId?: number, chapter?: string): Promise<
  * synchronously). That grouping is why this library has never been IP-banned, and
  * bypassing Suwayomi's downloader means reproducing it rather than inheriting it.
  */
-export async function fetchWanted(opts: { limit?: number; concurrency?: number } = {}): Promise<void> {
+export async function fetchWanted(
+  opts: { limit?: number; concurrency?: number; only?: { seriesId: number; chapter: string } } = {},
+): Promise<void> {
   const p = db();
   const concurrency = opts.concurrency ?? 6;
-  // Before selecting, so a row abandoned by an earlier process is a candidate again
-  // rather than sitting in "fetching" until somebody notices.
-  await reclaimStuck(Number(process.env["FETCH_STUCK_MINUTES"] ?? 30));
-  const rows = await nextWanted(opts.limit);
+  // Not for a single named chapter: reclaiming is for rows a dead process left behind, and
+  // this row was just handed over deliberately.
+  if (!opts.only) await reclaimStuck(Number(process.env["FETCH_STUCK_MINUTES"] ?? 30));
+  const rows = opts.only ? await nextWanted(undefined, undefined, opts.only) : await nextWanted(opts.limit);
   if (rows.length === 0) { console.log("nothing queued"); return; }
 
   const bySource = new Map<string, typeof rows>();
@@ -246,7 +267,7 @@ export async function fetchWanted(opts: { limit?: number; concurrency?: number }
   // one series and nothing else was attempted once: 24 rows queued and tried, every
   // other series at zero, no file written in ninety minutes. A source that is down must
   // cost a few slots, not the entire run.
-  const giveUpAfter = Number(process.env["FETCH_SERIES_STRIKES"] ?? 3);
+  const giveUpAfter = opts.only ? Number.MAX_SAFE_INTEGER : Number(process.env["FETCH_SERIES_STRIKES"] ?? 3);
   const strikes = new Map<number, number>();
   let skipped = 0;
 

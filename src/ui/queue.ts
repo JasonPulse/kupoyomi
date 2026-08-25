@@ -2,7 +2,7 @@ import { db } from "../db.js";
 import { esc, page, news } from "./layout.js";
 import { fmt } from "../held.js";
 
-export async function queuePage(): Promise<string> {
+export async function queuePage(said?: string): Promise<string> {
   const p = db();
   const rows = (await p.query<{ series_id: number; title: string; chapter_number: string; state: string; attempts: number; last_error: string | null; retry_after: string | null; wait_min: number | null }>(
     `SELECT w.series_id, s.title, w.chapter_number, w.state, w.attempts, w.last_error
@@ -34,7 +34,8 @@ export async function queuePage(): Promise<string> {
         : ""}</td></tr>`).join("");
 
   return page("queue", summary,
-    `${stuck.length > 0 ? `<div class="card"><div class="title bad">${stuck.length} chapters have given up after 4 attempts</div>
+    `${said ? `<div class="card" style="min-height:0;padding:6px 4px"><div class="meta"><b>${esc(said)}</b></div></div>` : ""}
+     ${stuck.length > 0 ? `<div class="card"><div class="title bad">${stuck.length} chapters have given up after 4 attempts</div>
        <div class="meta">These are not retried automatically. Usually the source stopped carrying the chapter,
        or its numbering changed.</div></div>` : ""}
      ${news("Queue", `<table><tr><th>series</th><th>chapter</th><th>state</th><th></th><th>last error</th></tr>

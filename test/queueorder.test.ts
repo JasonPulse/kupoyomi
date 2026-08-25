@@ -303,3 +303,46 @@ test("retrying one chapter ignores the wait and the attempt limit", { skip: !hav
 
   await p.query("UPDATE wanted SET state='pending', attempts=0, retry_after=NULL WHERE series_id=$1", [id]);
 });
+
+test("a named chapter is selectable outside the rotation", { skip: !haveDb }, async () => {
+  const p = db();
+  const id = ids.get("Zebra Chronicle")!;
+  // Buried: waiting out a backoff, and every other series ahead of it on turn order.
+  await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
+  await p.query(
+    `UPDATE wanted SET state='failed', attempts=3, retry_after = now() + interval '6 hours'
+      WHERE series_id=$1 AND chapter_number=4`, [id]);
+
+  assert.equal((await nextWanted(undefined, 25)).some(
+    (r) => r.series_id === id && Number(r.chapter_number) === 4), false,
+    "the rotation will not offer it");
+
+  const one = await nextWanted(undefined, undefined, { seriesId: id, chapter: "4.0000" });
+  assert.equal(one.length, 1, "naming it selects it regardless of turn, backoff or attempts");
+  assert.equal(Number(one[0]!.chapter_number), 4);
+  assert.ok(one[0]!.source_url !== undefined, "and it carries the binding needed to fetch it");
+
+  await p.query("UPDATE wanted SET state='pending', attempts=0, retry_after=NULL WHERE series_id=$1", [id]);
+});
+
+test("a chapter already in flight is not picked up twice", { skip: !haveDb }, async () => {
+  const p = db();
+  const id = ids.get("Zebra Chronicle")!;
+  await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
+  // A manual retry runs outside the scheduler, so a tick must not grab the same row.
+  await p.query(
+    `UPDATE wanted SET state='fetching', started_at = now(), attempts=0, retry_after=NULL
+      WHERE series_id=$1 AND chapter_number=5`, [id]);
+  assert.equal((await nextWanted(undefined, 25)).some(
+    (r) => r.series_id === id && Number(r.chapter_number) === 5), false,
+    "a row started seconds ago is being worked on, not waiting");
+
+  // But one abandoned long ago is fair game again.
+  await p.query(
+    "UPDATE wanted SET started_at = now() - interval '20 minutes' WHERE series_id=$1 AND chapter_number=5", [id]);
+  assert.equal((await nextWanted(undefined, 25)).some(
+    (r) => r.series_id === id && Number(r.chapter_number) === 5), true,
+    "a stale one is, or a dead process would strand it");
+
+  await p.query("UPDATE wanted SET state='pending', started_at=NULL WHERE series_id=$1", [id]);
+});

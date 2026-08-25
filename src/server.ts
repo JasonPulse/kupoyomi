@@ -324,7 +324,7 @@ export async function serve(): Promise<void> {
           .catch((e: unknown) => send(200, { chapters: null, error: e instanceof Error ? e.message : String(e) }));
         return;
       }
-      if (path === "/queue") return html(queuePage());
+      if (path === "/queue") return html(queuePage(url.searchParams.get("said") ?? undefined));
       if (path === "/downloads") return html(downloadsPage());
       if (path === "/api/live") {
         liveState().then((d) => send(200, d))
@@ -467,11 +467,18 @@ export async function serve(): Promise<void> {
           return `/series/${sid}?said=${encodeURIComponent(note)}`;
         }
         if (path === "/queue/retry") {
-          const { retryFailed } = await import("./fetch.js");
+          const { retryFailed, fetchWanted: fetchNow } = await import("./fetch.js");
           const sid = Number(form.get("series"));
           const ch = form.get("chapter");
+          const one = Number.isInteger(sid) && sid > 0 && ch;
           await retryFailed(Number.isInteger(sid) && sid > 0 ? sid : undefined, ch ?? undefined);
-          return form.get("back") === "series" && Number.isInteger(sid) ? `/series/${sid}` : "/queue";
+          // Started now rather than queued. Not awaited: a chapter takes tens of seconds
+          // and the page should come back at once, with the downloads view showing it in
+          // flight. Waiting for the next tick is a fifteen minute answer to "retry".
+          if (one) void fetchNow({ only: { seriesId: sid, chapter: ch } }).catch(() => undefined);
+          const said = one ? "?said=" + encodeURIComponent("retrying that chapter now") : "";
+          return form.get("back") === "series" && Number.isInteger(sid)
+            ? `/series/${sid}${said}` : `/queue${said}`;
         }
         const setCover = /^\/series\/(\d+)\/cover$/.exec(path);
         if (setCover) {

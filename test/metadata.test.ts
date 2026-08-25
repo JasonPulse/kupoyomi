@@ -773,3 +773,50 @@ test("a series whose source only publishes halves keeps taking them", { skip: !h
 
   for (const t of [NORMAL, HALVES]) await p.query("DELETE FROM series WHERE title = $1", [t]);
 });
+
+/**
+ * A folder must not be protected by a decision we made.
+ *
+ * Deleting the redundant part-numbered chapters left their files in the legacy folders,
+ * and "every chapter in this folder is held" then read as false: 33 of the 37 folders kept
+ * back were kept because of decimals we had deliberately removed, so they could never be
+ * pruned. A series that takes splits is the exception, since for it a missing decimal is a
+ * real gap.
+ */
+test("a decimal deleted on purpose does not protect its legacy folder", { skip: !haveDb }, async () => {
+  const { setLink, redundantFolders } = await import("../src/adopt.js");
+  const { mkdirSync: mk, writeFileSync: wf } = await import("node:fs");
+  const p = db();
+  const WHOLE = "Discard Rule Whole Series", SPLIT = "Discard Rule Split Series";
+  for (const t of [WHOLE, SPLIT]) await p.query("DELETE FROM series WHERE title = $1", [t]);
+
+  const build = async (title: string, takeSplits: boolean): Promise<string> => {
+    const r = await p.query<{ id: number }>(
+      "INSERT INTO series (title, folder, take_splits) VALUES ($1,$1,$2) RETURNING id", [title, takeSplits]);
+    const id = r.rows[0]!.id;
+    // Chapters 1 and 2 held; the folder also holds 1.1, which was deleted on purpose.
+    for (const n of [1, 2]) {
+      await p.query("INSERT INTO chapter (series_id, chapter_number, file_path) VALUES ($1,$2,$3)",
+        [id, n, `/nowhere/${id}-${n}.cbz`]);
+    }
+    const dir = join(legacyRoot, title.replace(/\s+/g, "_"));
+    mk(dir, { recursive: true });
+    for (const f of ["Chapter 1.cbz", "Chapter 2.cbz", "Chapter 1.1.cbz"]) wf(join(dir, f), Buffer.from(f));
+    await setLink(id, dir, "linked");
+    return dir;
+  };
+
+  const wholeDir = await build(WHOLE, false);
+  const splitDir = await build(SPLIT, true);
+
+  const report = await redundantFolders();
+  const whole = report.find((f) => f.path === wholeDir)!;
+  const split = report.find((f) => f.path === splitDir)!;
+
+  assert.equal(whole.heldAll, true,
+    "1.1 was deleted deliberately, so it is accounted for and must not hold the folder back");
+  assert.equal(split.heldAll, false,
+    "a series that takes splits genuinely lacks 1.1, so its folder is still needed");
+
+  for (const t of [WHOLE, SPLIT]) await p.query("DELETE FROM series WHERE title = $1", [t]);
+});

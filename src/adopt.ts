@@ -287,8 +287,9 @@ export async function redundantFolders(): Promise<Array<{
   heldAll: boolean;
 }>> {
   const p = db();
-  const links = (await p.query<{ series_id: number; path: string; title: string }>(
-    `SELECT l.series_id, l.path, s.title FROM legacy_link l JOIN series s ON s.id = l.series_id
+  const links = (await p.query<{ series_id: number; path: string; title: string; take_splits: boolean }>(
+    `SELECT l.series_id, l.path, s.title, s.take_splits
+       FROM legacy_link l JOIN series s ON s.id = l.series_id
       WHERE l.state = 'linked' ORDER BY s.title`)).rows;
   const out: Array<{ seriesId: number; title: string; path: string; files: number;
     bytes: number; reclaimable: number; linkedCopies: number; heldAll: boolean }> = [];
@@ -303,7 +304,14 @@ export async function redundantFolders(): Promise<Array<{
       files++;
       const n = parseChapterNumber(f);
       // A file whose number cannot be read is not proven redundant, so it protects the folder.
-      if (n === null || !held.has(n)) { missing++; continue; }
+      if (n === null) { missing++; continue; }
+      // A part-numbered chapter whose whole chapter is held was deleted on purpose, so it
+      // is accounted for rather than missing. Without this, 33 of the 37 folders kept back
+      // were kept by our own decision and could never be pruned. A series that takes
+      // splits is exempt: for it, a decimal is wanted and its absence is a real gap.
+      const discarded = !l.take_splits && !Number.isInteger(n) && held.has(Math.trunc(n));
+      if (!held.has(n) && !discarded) { missing++; continue; }
+      if (discarded) continue;   // no file of ours to compare against, so nothing to count
       try {
         const st = statSync(`${l.path}/${f}`);
         bytes += st.size;

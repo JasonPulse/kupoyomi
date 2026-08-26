@@ -89,6 +89,8 @@ export async function findOnDisk(seriesId: number, opts: { propose?: boolean } =
   if (!s) throw new Error(`no series ${seriesId}`);
   const held = new Set((await p.query<{ n: string }>(
     "SELECT chapter_number AS n FROM chapter WHERE series_id = $1", [seriesId])).rows.map((r) => Number(r.n)));
+  const takesSplits = (await p.query<{ t: boolean }>(
+    "SELECT take_splits AS t FROM series WHERE id = $1", [seriesId])).rows[0]?.t ?? false;
   const decided = new Map((await p.query<{ path: string; state: string }>(
     "SELECT path, state FROM legacy_link WHERE series_id = $1", [seriesId])).rows.map((r) => [r.path, r.state]));
   const aliases = (await p.query<{ norm: string }>(
@@ -116,6 +118,11 @@ export async function findOnDisk(seriesId: number, opts: { propose?: boolean } =
       const n = parseChapterNumber(f);
       if (n === null) continue;
       if (held.has(n)) { alreadyHeld++; continue; }
+      // A part-numbered chapter whose whole chapter is held was deleted on purpose.
+      // Offering it back put an adopt button on four folders that had nothing left to
+      // give, and pressing it would have undone the prune. A series that takes splits
+      // wants them, so it is exempt.
+      if (!takesSplits && !Number.isInteger(n) && held.has(Math.trunc(n))) { alreadyHeld++; continue; }
       let size = 0;
       try { size = statSync(`${dir}/${f}`).size; } catch { continue; }
       const prev = best.get(n);

@@ -475,7 +475,14 @@ export async function serve(): Promise<void> {
           // Started now rather than queued. Not awaited: a chapter takes tens of seconds
           // and the page should come back at once, with the downloads view showing it in
           // flight. Waiting for the next tick is a fifteen minute answer to "retry".
-          if (one) void fetchNow({ only: { seriesId: sid, chapter: ch } }).catch(() => undefined);
+          // Never swallowed. A retry that failed before it reached the download loop left
+          // the row sitting in pending with nothing said anywhere, which is the one thing
+          // a manual retry must not do.
+          if (one) {
+            void fetchNow({ only: { seriesId: sid, chapter: ch } }).catch((e: unknown) =>
+              console.log(`retry of ${sid} ch ${ch} could not start: ${
+                e instanceof Error ? (e.stack ?? e.message) : String(e)}`));
+          }
           const said = one ? "?said=" + encodeURIComponent("retrying that chapter now") : "";
           return form.get("back") === "series" && Number.isInteger(sid)
             ? `/series/${sid}${said}` : `/queue${said}`;

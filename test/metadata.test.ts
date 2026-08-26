@@ -874,3 +874,34 @@ test("forcing a source-less refresh moves to another page and still fills the sy
 
   await p.query("DELETE FROM series WHERE id = $1", [sid]);
 });
+
+test("adoption does not offer back the decimals we deleted", { skip: !haveDb }, async () => {
+  const { setLink, findOnDisk } = await import("../src/adopt.js");
+  const { mkdirSync: mk, writeFileSync: wf } = await import("node:fs");
+  const p = db();
+  const TITLE = "Reoffer Test Series";
+  await p.query("DELETE FROM series WHERE title = $1", [TITLE]);
+  const s = await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [TITLE]);
+  const sid = s.rows[0]!.id;
+  for (const n of [1, 2]) {
+    await p.query("INSERT INTO chapter (series_id, chapter_number, file_path) VALUES ($1,$2,$3)",
+      [sid, n, `/nowhere/${sid}-${n}.cbz`]);
+  }
+  const dir = join(legacyRoot, "Reoffer_Test_Series");
+  mk(dir, { recursive: true });
+  // 1.1 was deleted on purpose; 3 is genuinely new.
+  for (const f of ["Chapter 1.cbz", "Chapter 1.1.cbz", "Chapter 3.cbz"]) wf(join(dir, f), Buffer.from(f));
+  await setLink(sid, dir, "linked");
+
+  let offers = [...(await findOnDisk(sid)).sources[0]!.offers.keys()].sort((a, b) => a - b);
+  assert.deepEqual(offers, [3],
+    "only the genuinely new chapter is offered: re-adopting 1.1 would undo the prune");
+
+  // A series that takes splits wants it back.
+  await p.query("UPDATE series SET take_splits = true WHERE id = $1", [sid]);
+  offers = [...(await findOnDisk(sid)).sources[0]!.offers.keys()].sort((a, b) => a - b);
+  assert.deepEqual(offers, [1.1, 3], "unless the series takes splits, in which case it is wanted");
+
+  await p.query("DELETE FROM series WHERE id = $1", [sid]);
+});

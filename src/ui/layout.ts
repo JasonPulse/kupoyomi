@@ -12,7 +12,7 @@ const css = (): string => `
   --ink:#efe7db;          /* body text on dark */
   --ink-dim:#b6ac9f;      /* secondary text, raised: #9b9186 was unreadable on the panel */
   --ink-faint:#8b8177;
-  --gold:#e3b661;         /* accents, links, the active tab */
+  --gold:#d8ae63;         /* accents, links, the active tab */
   --gold-dim:#a8863f;
   --good:#8fbf5a;
   --bad:#d1584c;
@@ -57,11 +57,16 @@ nav a.on::after{content:"";position:absolute;left:-14px;right:-14px;bottom:-1px;
 .sub{color:var(--ink-faint);font-size:12px;margin-left:auto;padding-bottom:8px;position:relative}
 main{padding:20px 20px 48px;max-width:1240px;margin:0 auto}
 
-/* Window_Background.png, 128x128, border 18px on every side, fill rgb(21,19,18). */
-.card,.tile{position:relative;color:var(--ink);margin:0 0 16px;
-  border:18px solid transparent;
-  border-image:url(${asset('/ui-panel.png')}) 18 fill stretch}
-.card{padding:4px 6px;min-height:60px}
+/* BorderFrame_Square02_BorderDeco from GUI Pro FantasyRPG: a 98x98 frame with the heavy
+   work on the top-left and bottom-right diagonals, shipped white with alpha so the colour
+   is ours. Tinted #b08a4c, a muted bronze, because the pack's own gold is the cartoonish
+   part of it. Slice 40 keeps the ornament; the border is drawn at 26 so it compresses
+   slightly rather than eating a small panel. */
+.card,.tile{position:relative;color:var(--ink);margin:0 0 18px;
+  background:rgba(18,16,15,.93);
+  border:26px solid transparent;
+  border-image:url(${asset('/ui2-corner.png')}) 40 fill stretch}
+.card{padding:2px 8px;min-height:60px}
 .tile{padding:0;margin-bottom:0}
 /* ModalBox_Background.png, a heavier frame for something set inside a panel. */
 .well{border:14px solid transparent;border-image:url(${asset('/ui-well.png')}) 36 fill stretch;
@@ -91,23 +96,24 @@ tr:hover td{background:rgba(67,62,59,.30)}
   display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .actions .hint{color:var(--ink-faint);font-size:11px}
 
-/* Button_RM_Background.png, 128x128, border 29, fill rgb(51,46,41). This is the kit's
-   own button, the one its ACCEPT / DECLINE / PLAY are drawn with: dark grey-brown with a
-   thin bevel and a gold uppercase label. The green and red variants in the pack are
-   colour swaps that appear nowhere in its own screens, and using one was me picking a
-   file rather than looking at the design. Button_RL_Press.png is a translucent black
-   wash, which is how the kit does the pressed state. */
+/* Button_Rectangle_01_Convex_Dark from the same pack: 159x104, slice 12 top and bottom,
+   42 and 43 on the sides where the ends are shaped, fill rgb(55,55,57). Already dark and
+   restrained, so it needs no tinting. The pack's blue, green and purple variants are the
+   cartoonish end of it and are left alone. */
 button{font:600 11.5px/1 inherit;letter-spacing:1.1px;text-transform:uppercase;
-  color:var(--gold);cursor:pointer;padding:7px 16px;background:none;white-space:nowrap;
-  flex:0 0 auto;border:14px solid transparent;
-  border-image:url(${asset('/ui-btn.png')}) 29 fill stretch;text-shadow:0 1px 2px rgba(0,0,0,.7)}
-button:hover{color:#f6e6c6;filter:brightness(1.22)}
-button:active{border-image:url(${asset('/ui-btn-press.png')}) 22 fill stretch;color:var(--gold-dim)}
-/* Secondary is the same frame at a smaller size with a quieter label, since the kit has
-   one button and varies its scale, not its colour. */
-button.weak{padding:5px 11px;font-size:10.5px;letter-spacing:.9px;color:var(--ink-dim);
-  border-width:11px}
-button.weak:hover{color:var(--ink)}
+  color:var(--gold);cursor:pointer;padding:6px 8px;background:none;white-space:nowrap;
+  flex:0 0 auto;border:12px solid transparent;border-left-width:30px;border-right-width:30px;
+  border-image:url(${asset('/ui2-btn.png')}) 12 42 12 43 fill stretch;
+  text-shadow:0 1px 2px rgba(0,0,0,.75)}
+button:hover{filter:brightness(1.28);color:#f6e6c6}
+button:active{filter:brightness(.85)}
+/* Secondary keeps out of the way: the pack has one rectangle button and a second image
+   at a smaller scale just looks like the first one squashed. */
+button.weak{border:1px solid rgba(176,138,76,.30);border-image:none;padding:5px 11px;
+  font-size:10.5px;letter-spacing:.9px;color:var(--ink-dim);
+  background:rgba(255,255,255,.04);border-radius:1px;text-shadow:none}
+button.weak:hover{filter:none;background:rgba(255,239,221,.09);
+  border-color:rgba(176,138,76,.6);color:var(--ink)}
 button.danger{color:var(--bad)}
 button.danger:hover{color:#f08a80}
 button[disabled]{opacity:.35;cursor:default;filter:grayscale(.6)}

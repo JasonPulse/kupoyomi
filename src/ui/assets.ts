@@ -19,7 +19,6 @@ export const ASSETS: Record<string, { body: Buffer; type: string } | undefined> 
     ["/icon-512.png", "icon-512.png", "image/png"],
     ["/apple-touch-icon.png", "apple-touch-icon.png", "image/png"],
     // RPG and MMO UI 4. Nine-slice frames, button states and the tab indicator.
-    ["/ui-panel.png", "ui-panel.png", "image/png"],
     ["/ui-well.png", "ui-well.png", "image/png"],
     ["/ui-input.png", "ui-input.png", "image/png"],
     ["/ui-btn.png", "ui-btn.png", "image/png"],
@@ -30,6 +29,11 @@ export const ASSETS: Record<string, { body: Buffer; type: string } | undefined> 
     ["/ui-tab-active.png", "ui-tab-active.png", "image/png"],
     ["/ui-header.png", "ui-header.png", "image/png"],
     ["/ui-bg.png", "ui-bg.png", "image/png"],
+    // GUI Pro FantasyRPG. The ornate frame and the dark button, both from its own set.
+    // The frame ships white with alpha so its colour is ours to choose; it is tinted to a
+    // muted bronze rather than the pack's fantasy gold, which is the cartoonish part.
+    ["/ui2-corner.png", "ui2-corner.png", "image/png"],
+    ["/ui2-btn.png", "ui2-btn.png", "image/png"],
   ] as const).flatMap(([route, file, type]) => {
     const body = load(file);
     return body ? [[route, { body, type }] as const] : [];

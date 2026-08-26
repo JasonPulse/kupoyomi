@@ -70,12 +70,18 @@ export async function streamSearch(res: ServerResponse, query: string, concurren
  * them into a single number is what made the old library offer migrations that lost you
  * chapters.
  */
-async function against(seriesId: number, offered: number[]): Promise<{
+async function against(seriesId: number, offeredAll: number[]): Promise<{
   newBeyond: number; fillsGaps: number; notCarried: number; held: number; heldMax: number | null;
 }> {
   const { db } = await import("../db.js");
   const held = new Set((await db().query<{ n: string }>(
     "SELECT chapter_number AS n FROM chapter WHERE series_id = $1", [seriesId])).rows.map((r) => Number(r.n)));
+  // Count only what would actually be fetched. A whole-only series showed "+11 fills" for
+  // a source whose eleven were nine part-numbered chapters and two real ones, so the
+  // column promised eleven chapters and the queue asked for two.
+  const takesSplits = (await db().query<{ t: boolean }>(
+    "SELECT take_splits AS t FROM series WHERE id = $1", [seriesId])).rows[0]?.t ?? false;
+  const offered = takesSplits ? offeredAll : offeredAll.filter((n) => Number.isInteger(n));
   const heldMax = held.size > 0 ? Math.max(...held) : null;
   const offeredSet = new Set(offered);
   return {

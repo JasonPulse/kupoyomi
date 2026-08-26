@@ -56,45 +56,58 @@ main{padding:20px 20px 48px;max-width:1240px;margin:0 auto}
 
 .title{font-weight:600;margin-bottom:3px;color:#f3ece1;letter-spacing:.2px}
 .meta,.dim,.n{color:var(--ink-dim);font-size:12px}
-.card h2{font-size:14px;margin:0 0 10px;font-weight:600;color:var(--gold);
-  letter-spacing:.4px;text-transform:uppercase}
+/* WINDOW TITLE: centred, uppercase, gold, over the kit's separator strip. */
+.card h2{font-size:12.5px;margin:-2px -6px 12px;padding:0 0 7px;font-weight:600;
+  color:var(--gold);letter-spacing:2px;text-transform:uppercase;text-align:center;
+  border-bottom:3px solid transparent;
+  border-image:url(/ui-sep.png) 0 1 3 1 stretch}
 .card a,.tile a{color:var(--gold)}
 .rec{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
 table{border-collapse:collapse;width:100%;font-size:13px}
 th{text-align:left;color:var(--gold-dim);font-weight:600;padding:6px 8px;
   border-bottom:1px solid var(--line);white-space:nowrap;font-size:11.5px;
   letter-spacing:.5px;text-transform:uppercase}
-td{padding:6px 8px;border-bottom:1px solid rgba(255,255,255,.055);vertical-align:top}
-tr:hover td{background:rgba(227,182,97,.05)}
+td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.045);vertical-align:top}
+/* CharacterWindow_Title_Background and its Active sibling are flat translucent fills,
+   rgba(44,41,38,.2) and rgba(67,62,59,.2), so they are CSS rather than two more images. */
+tbody tr:nth-child(odd) td,table tr:nth-child(even) td{background:rgba(44,41,38,.20)}
+tr:hover td{background:rgba(67,62,59,.30)}
 .badge{display:inline-block;font-size:11px;padding:1px 8px;border-radius:2px;
   background:rgba(227,182,97,.10);color:var(--gold);border:1px solid rgba(227,182,97,.30)}
 .actions{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);
   display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .actions .hint{color:var(--ink-faint);font-size:11px}
 
-/* Buttom_RS_Foreground_Green.png for anything that acts, its Hover sibling on hover.
-   The kit's tiny button is a flat fill with translucent overlays for its states, so the
-   secondary button is those overlays in CSS and needs no image at all. */
-button{font:600 12.5px/1 inherit;color:#f7f3e8;cursor:pointer;padding:8px 14px;
-  border:14px solid transparent;border-image:url(/ui-btn.png) 16 fill stretch;
-  background:none;white-space:nowrap;flex:0 0 auto;text-shadow:0 1px 1px rgba(0,0,0,.5)}
-button:hover{border-image:url(/ui-btn-hover.png) 16 fill stretch}
-button.weak{border:1px solid rgba(227,182,97,.28);border-image:none;
-  background:rgba(255,255,255,.045);color:var(--ink);padding:6px 11px;border-radius:2px;
-  text-shadow:none}
-button.weak:hover{background:rgba(255,239,221,.09);border-color:rgba(227,182,97,.5);color:#f3ece1}
-button.danger{border-image:url(/ui-btn-danger.png) 16 fill stretch}
-button.danger:hover{border-image:url(/ui-btn-danger-hover.png) 16 fill stretch}
-button:active{filter:brightness(.88)}
-button[disabled]{opacity:.4;cursor:default;filter:grayscale(.5)}
+/* Button_RM_Background.png, 128x128, border 29, fill rgb(51,46,41). This is the kit's
+   own button, the one its ACCEPT / DECLINE / PLAY are drawn with: dark grey-brown with a
+   thin bevel and a gold uppercase label. The green and red variants in the pack are
+   colour swaps that appear nowhere in its own screens, and using one was me picking a
+   file rather than looking at the design. Button_RL_Press.png is a translucent black
+   wash, which is how the kit does the pressed state. */
+button{font:600 11.5px/1 inherit;letter-spacing:1.1px;text-transform:uppercase;
+  color:var(--gold);cursor:pointer;padding:7px 16px;background:none;white-space:nowrap;
+  flex:0 0 auto;border:14px solid transparent;
+  border-image:url(/ui-btn.png) 29 fill stretch;text-shadow:0 1px 2px rgba(0,0,0,.7)}
+button:hover{color:#f6e6c6;filter:brightness(1.22)}
+button:active{border-image:url(/ui-btn-press.png) 22 fill stretch;color:var(--gold-dim)}
+/* Secondary is the same frame at a smaller size with a quieter label, since the kit has
+   one button and varies its scale, not its colour. */
+button.weak{padding:5px 11px;font-size:10.5px;letter-spacing:.9px;color:var(--ink-dim);
+  border-width:11px}
+button.weak:hover{color:var(--ink)}
+button.danger{color:var(--bad)}
+button.danger:hover{color:#f08a80}
+button[disabled]{opacity:.35;cursor:default;filter:grayscale(.6)}
 
-/* Input_Background.png, 128x128, border 33px. Drawn at 12px so the bevel reads without
-   eating the field. */
-input[type=search],input[type=text],select{color:var(--ink);font:13px/1.3 inherit;
-  padding:7px 11px;border:12px solid transparent;
-  border-image:url(/ui-input.png) 33 fill stretch;background:none;max-width:100%}
-input[type=search],input[type=text]{min-width:320px}
-select{font-size:12.5px;padding:6px 9px}
+/* Input_Background.png border 33, SelectField_Background.png border 13 with the kit's own
+   down arrow, which is the "YOUR REALM" field from its character select. */
+input[type=search],input[type=text]{color:var(--ink);font:13px/1.3 inherit;padding:7px 11px;
+  border:12px solid transparent;border-image:url(/ui-input.png) 33 fill stretch;
+  background:none;max-width:100%;min-width:320px}
+select{color:var(--ink);font:12.5px/1.3 inherit;padding:6px 30px 6px 11px;
+  border:10px solid transparent;border-image:url(/ui-select.png) 13 fill stretch;
+  background:url(/ui-select-arrow.png) no-repeat right 6px center;background-size:14px 14px;
+  max-width:100%;appearance:none;-webkit-appearance:none}
 input:focus,select:focus{outline:none;box-shadow:0 0 0 1px rgba(227,182,97,.45)}
 input::placeholder{color:var(--ink-faint)}
 
@@ -127,7 +140,9 @@ a.series:hover{text-decoration:underline;color:#f6e6c6}
 /* Cover art sits in its own recessed slot, which is what the kit does with item icons. */
 .lc,.bt{background:#141210;border:1px solid rgba(227,182,97,.22);
   box-shadow:0 1px 6px rgba(0,0,0,.55),inset 0 0 0 1px rgba(0,0,0,.6)}
-.lc .t,.bt .n{color:var(--ink)}
+/* The kit lists things as a gold name over a grey sub-line, which is what a cover tile
+   and a search row both are. */
+.lc .t,.bt .n{color:var(--gold);font-weight:600}
 .lc .s{color:var(--ink-dim)}
 .cover{background:#1a1715}
 .flag{display:inline-block;font-size:10.5px;padding:1px 6px;border-radius:2px;

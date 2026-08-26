@@ -22,9 +22,10 @@ export const ASSETS: Record<string, { body: Buffer; type: string } | undefined> 
     ["/ui-well.png", "ui-well.png", "image/png"],
     ["/ui-input.png", "ui-input.png", "image/png"],
     ["/ui-btn.png", "ui-btn.png", "image/png"],
-    ["/ui-btn-hover.png", "ui-btn-hover.png", "image/png"],
-    ["/ui-btn-danger.png", "ui-btn-danger.png", "image/png"],
-    ["/ui-btn-danger-hover.png", "ui-btn-danger-hover.png", "image/png"],
+    ["/ui-btn-press.png", "ui-btn-press.png", "image/png"],
+    ["/ui-select.png", "ui-select.png", "image/png"],
+    ["/ui-select-arrow.png", "ui-select-arrow.png", "image/png"],
+    ["/ui-sep.png", "ui-sep.png", "image/png"],
     ["/ui-tab-active.png", "ui-tab-active.png", "image/png"],
     ["/ui-header.png", "ui-header.png", "image/png"],
   ] as const).flatMap(([route, file, type]) => {

@@ -1,4 +1,4 @@
-import { mkdirSync, renameSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, renameSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "./config.js";
 import { db } from "./db.js";
@@ -85,12 +85,18 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
       console.log(`  ${b.title.slice(0, 40)}: skipping ${skippedSplits} part-numbered chapter${
         skippedSplits === 1 ? "" : "s"}`);
     }
-    const held = new Set((await p.query<{ chapter_number: string }>(
+    const heldNums = (await p.query<{ chapter_number: string }>(
       "SELECT chapter_number FROM chapter WHERE series_id = $1", [b.series_id])).rows
-      .map((r) => Number(r.chapter_number)));
+      .map((r) => Number(r.chapter_number));
+    const held = new Set(heldNums);
+    // Whole chapters we already hold as parts. Holding 8.1 and 8.2 is holding chapter 8,
+    // so fetching the whole 8 is fetching the same pages a third time. It was queued for
+    // exactly that and kept failing against a source that 500s.
+    const heldAsParts = new Set(heldNums.filter((n) => !Number.isInteger(n)).map(Math.trunc));
 
     for (const n of offered2) {
       if (held.has(n)) continue;
+      if (wholeOnly && Number.isInteger(n) && heldAsParts.has(n)) continue;
       const r = await p.query(
         `INSERT INTO wanted (series_id, chapter_number, binding_id) VALUES ($1,$2,$3)
          ON CONFLICT (series_id, chapter_number) DO NOTHING`, [b.series_id, n, b.id]);
@@ -341,6 +347,22 @@ export async function fetchWanted(
           `UPDATE wanted SET state='done', finished_at=now(), attempts=attempts+1,
              last_error=NULL, retry_after=NULL WHERE series_id=$1 AND chapter_number=$2`,
           [it.series_id, it.chapter_number]);
+        // A whole chapter supersedes the parts it was split into, so they go with it
+        // rather than sitting there as a second copy waiting for a manual prune.
+        if (Number.isInteger(Number(it.chapter_number))) {
+          const parts = (await p.query<{ chapter_number: string; file_path: string }>(
+            `SELECT chapter_number, file_path FROM chapter
+              WHERE series_id = $1 AND chapter_number <> trunc(chapter_number)
+                AND trunc(chapter_number) = $2`, [it.series_id, it.chapter_number])).rows;
+          for (const part of parts) {
+            try { rmSync(part.file_path); } catch { /* a missing file is already gone */ }
+            await p.query("DELETE FROM chapter WHERE series_id = $1 AND chapter_number = $2",
+              [it.series_id, part.chapter_number]);
+          }
+          if (parts.length > 0) {
+            console.log(`      superseded ${parts.length} part${parts.length === 1 ? "" : "s"} of ch ${it.chapter_number}`);
+          }
+        }
         done++;
         // Its turn advances by one chapter. Divided by the block size this is the turn
         // number, so twenty-five successes move the series behind the others.

@@ -214,3 +214,20 @@ test("only whole chapters are taken from a source", () => {
   // rather than truthy: chapter 0 exists in this library.
   assert.deepEqual([0, 0.5, 1].filter((n) => Number.isInteger(n)), [0, 1]);
 });
+
+test("a whole chapter already held as parts is not fetched again", () => {
+  // Holding 8.1 and 8.2 is holding chapter 8, so fetching whole 8 is the same pages a
+  // third time. Series 125 was queued for exactly that and kept failing.
+  const held = [1, 2, 8.1, 8.2, 9];
+  const heldSet = new Set(held);
+  const heldAsParts = new Set(held.filter((n) => !Number.isInteger(n)).map(Math.trunc));
+  const wanted = (offered: number[]): number[] => offered
+    .filter((n) => Number.isInteger(n))
+    .filter((n) => !heldSet.has(n))
+    .filter((n) => !heldAsParts.has(n));
+
+  assert.deepEqual(wanted([1, 2, 8, 9, 10, 11]), [10, 11],
+    "8 is skipped because its parts are held; 10 and 11 are genuinely new");
+  // A part held for a chapter we also hold whole changes nothing.
+  assert.deepEqual(wanted([8]), [], "and it stays skipped however often it is offered");
+});

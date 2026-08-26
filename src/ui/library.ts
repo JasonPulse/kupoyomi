@@ -12,7 +12,7 @@ type Row = {
 const EXTRA = `
 .lib{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:14px}
 .lc{position:relative;border-radius:5px;overflow:hidden;text-decoration:none;display:block}
-.lc img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#242424}
+.lc img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#1a1715}
 .lc .noimg{width:100%;aspect-ratio:2/3;background:linear-gradient(160deg,#2a2438,#1b1b22);
   display:flex;align-items:center;justify-content:center;color:#544c66;font-size:11px}
 .lc .t{padding:7px 8px 4px;font-size:12px;line-height:1.3;color:#dde;height:47px;overflow:hidden}
@@ -24,7 +24,7 @@ const EXTRA = `
 .lc .pb > i{display:block;height:100%;background:#2b6}
 .vw{margin-bottom:12px}
 .vw a{color:#4a3a7a;text-decoration:none;font-size:12px;margin-right:12px}
-.vw a.on{color:#2b2318;font-weight:700}
+.vw a.on{color:var(--gold);font-weight:600}
 `;
 
 export async function libraryPage(q?: string, view = "grid"): Promise<string> {

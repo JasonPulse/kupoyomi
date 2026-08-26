@@ -70,7 +70,7 @@ export async function browseIndex(): Promise<string> {
 const EXTRA = `
 .grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(215px,1fr));gap:14px}
 .bt{border-radius:6px;overflow:hidden}
-.bt img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#222}
+.bt img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#1a1715}
 .bt{display:flex;flex-direction:column}
 .bt .n{padding:8px 9px 3px;font-size:13px;line-height:1.35;max-height:56px;overflow:hidden;font-weight:600}
 .bt .syn{padding:0 9px;font-size:11.5px;line-height:1.4;color:#c6c6cf;
@@ -80,7 +80,8 @@ const EXTRA = `
 .bt .f{padding:6px 8px 8px;display:flex;justify-content:space-between;align-items:center;
   font-size:11px;gap:6px;margin-top:auto}
 .chips{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0}
-.chip{font-size:11px;padding:2px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.25);color:#4a4034;text-decoration:none}
+.chip{font-size:11px;padding:3px 9px;border-radius:2px;border:1px solid rgba(227,182,97,.28);color:var(--ink-dim);text-decoration:none;background:rgba(255,255,255,.04)}
+.chip:hover{border-color:rgba(227,182,97,.55);color:#f3ece1;background:rgba(255,239,221,.08)}
 .chip.on{background:#5d8a4a;color:#f2f6ee;border-color:#476b38;font-weight:700}
 `;
 

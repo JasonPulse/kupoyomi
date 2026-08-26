@@ -29,12 +29,12 @@ export async function pickCoverPage(seriesId: number): Promise<string> {
     `<style>
        .pg{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:6px}
        @media(max-width:700px){.pg{grid-template-columns:repeat(3,1fr)}}
-       .pick{padding:0;background:none;border:1px solid #a99d84;border-radius:4px;overflow:hidden;
+       .pick{padding:0;background:none;border:1px solid rgba(227,182,97,.25);border-image:none;border-radius:2px;overflow:hidden;
          display:block;width:100%;cursor:pointer;white-space:normal}
-       .pick img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#242424}
-       .pick span{display:block;font-size:11px;color:#3a3025;background:#cdc3ab;padding:2px 0}
-       .pick:hover{border-color:#5d8a4a;filter:none}
-       .cur{width:120px;height:172px;object-fit:cover;border-radius:4px;background:#242424}
+       .pick img{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#1a1715}
+       .pick span{display:block;font-size:11px;color:var(--ink-dim);background:rgba(0,0,0,.55);padding:3px 0}
+       .pick:hover{border-color:var(--gold);filter:none}
+       .cur{width:120px;height:172px;object-fit:cover;border-radius:4px;background:#1a1715}
      </style>
      <div class="card">
        <div class="title">${esc(s.title)}</div>

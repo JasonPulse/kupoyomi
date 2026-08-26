@@ -57,7 +57,7 @@ export async function previewPage(sourceId: string, url: string, title: string):
   return page("search", `${d.chapters.totalCount} chapters on ${esc(d.source?.displayName ?? "this source")}`,
     `<style>.hero{display:flex;gap:18px;align-items:flex-start}
        .hero img{width:200px;height:286px;object-fit:cover;border-radius:5px;background:#2a2a30;flex:0 0 auto}
-       .hero .syn{color:#4a4034;font-size:13px;margin-top:9px;white-space:pre-wrap}</style>
+       .hero .syn{color:var(--ink-dim);font-size:13px;margin-top:9px;white-space:pre-wrap}</style>
      <div class="card">
        <div class="hero">
          <img src="/thumb/${mangaId}" alt="">

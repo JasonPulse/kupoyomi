@@ -17,15 +17,16 @@ export const ASSETS: Record<string, { body: Buffer; type: string } | undefined> 
     ["/icon-192.png", "icon-192.png", "image/png"],
     ["/icon-512.png", "icon-512.png", "image/png"],
     ["/apple-touch-icon.png", "apple-touch-icon.png", "image/png"],
-    // One nine-slice frame, built from the three originals. They stay served because
-    // newsframe.png is derived from them and nothing else regenerates it.
-    ["/newsframe.png", "newsframe.png", "image/png"],
-    ["/newstop.png", "newstop.png", "image/png"],
-    ["/newsmiddle.png", "newsmiddle.png", "image/png"],
-    ["/newsbottom.png", "newsbottom.png", "image/png"],
-    ["/newsheader.png", "newsheader.png", "image/png"],
-    ["/arrows.png", "arrows.png", "image/png"],
-    ["/tab-on.png", "tab-on.png", "image/png"],
+    // RPG and MMO UI 4. Nine-slice frames, button states and the tab indicator.
+    ["/ui-panel.png", "ui-panel.png", "image/png"],
+    ["/ui-well.png", "ui-well.png", "image/png"],
+    ["/ui-input.png", "ui-input.png", "image/png"],
+    ["/ui-btn.png", "ui-btn.png", "image/png"],
+    ["/ui-btn-hover.png", "ui-btn-hover.png", "image/png"],
+    ["/ui-btn-danger.png", "ui-btn-danger.png", "image/png"],
+    ["/ui-btn-danger-hover.png", "ui-btn-danger-hover.png", "image/png"],
+    ["/ui-tab-active.png", "ui-tab-active.png", "image/png"],
+    ["/ui-header.png", "ui-header.png", "image/png"],
   ] as const).flatMap(([route, file, type]) => {
     const body = load(file);
     return body ? [[route, { body, type }] as const] : [];

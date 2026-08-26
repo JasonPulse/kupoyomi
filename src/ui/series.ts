@@ -90,8 +90,8 @@ export async function seriesPage(id: number, said?: string): Promise<string> {
   return page("library",
     `${chapters.length} held &middot; ${wanted.length} queued &middot; ${gaps.length} gaps`,
     `<style>.hero{display:flex;gap:18px;align-items:flex-start}
-       .hero img{width:210px;height:300px;object-fit:cover;border-radius:5px;background:#242424;flex:0 0 auto}
-       .hero .syn{color:#4a4034;font-size:13px;margin-top:9px;white-space:pre-wrap}
+       .hero img{width:210px;height:300px;object-fit:cover;border-radius:5px;background:#1a1715;flex:0 0 auto}
+       .hero .syn{color:var(--ink-dim);font-size:13px;margin-top:9px;white-space:pre-wrap}
        /* Phone: the cover floats so the synopsis flows around and then under it. A flex
           row cannot wrap text under a sibling, so a 210px cover left the synopsis about
           four words wide. */

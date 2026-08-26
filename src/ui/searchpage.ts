@@ -288,7 +288,7 @@ es.onerror = () => { es.close(); status.textContent += ' — connection ended'; 
 const EXTRA_CSS = `
 #results{display:flex;flex-direction:column}
 .srch-head{display:flex;gap:16px;margin-bottom:12px;align-items:flex-start}
-.cover{width:190px;height:272px;object-fit:cover;border-radius:4px;background:#242424;flex:0 0 auto}
+.cover{width:190px;height:272px;object-fit:cover;border-radius:4px;background:#1a1715;flex:0 0 auto}
 .srch-body{min-width:0}
 /* On a phone the cover floats and the text flows around and under it. A flex row cannot
    do that: the synopsis is stuck in a column beside a fixed-width cover, which on a
@@ -300,10 +300,10 @@ const EXTRA_CSS = `
   .srch-body{min-width:0;overflow:visible}
   .desc,.descfull{font-size:12.5px;-webkit-line-clamp:14}
 }
-.desc{color:#4a4034;font-size:12.5px;margin-top:7px;display:-webkit-box;-webkit-line-clamp:10;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;list-style:none}
+.desc{color:var(--ink-dim);font-size:12.5px;margin-top:7px;display:-webkit-box;-webkit-line-clamp:10;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;list-style:none}
 .desc::-webkit-details-marker{display:none}
 .dwrap[open] .desc{display:none}
-.descfull{color:#4a4034;font-size:12.5px;margin-top:7px;white-space:pre-wrap}
+.descfull{color:var(--ink-dim);font-size:12.5px;margin-top:7px;white-space:pre-wrap}
 table.srcs th:nth-child(2),table.srcs td:nth-child(2){max-width:220px}
 table.srcs th:nth-child(3),table.srcs td:nth-child(3){width:88px}
 table.srcs th:nth-child(4),table.srcs td:nth-child(4){width:110px}

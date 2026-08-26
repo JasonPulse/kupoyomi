@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,8 +29,29 @@ export const ASSETS: Record<string, { body: Buffer; type: string } | undefined> 
     ["/ui-sep.png", "ui-sep.png", "image/png"],
     ["/ui-tab-active.png", "ui-tab-active.png", "image/png"],
     ["/ui-header.png", "ui-header.png", "image/png"],
+    ["/ui-bg.png", "ui-bg.png", "image/png"],
   ] as const).flatMap(([route, file, type]) => {
     const body = load(file);
     return body ? [[route, { body, type }] as const] : [];
   }),
 );
+
+
+/**
+ * A content hash per asset, appended to its url in the stylesheet.
+ *
+ * Assets are served with a day of cache, so replacing one leaves every browser showing
+ * the old file until tomorrow. That is why a button already changed on the server was
+ * still green on screen, and it is the same mistake the cover images had: the file
+ * changed and the url did not, so nothing went and fetched it.
+ */
+export const ASSET_VERSION: Record<string, string> = Object.fromEntries(
+  Object.entries(ASSETS).map(([route, a]) => [
+    route, a ? createHash("sha1").update(a.body).digest("hex").slice(0, 8) : "0",
+  ]),
+);
+
+/** "/ui-btn.png" -> "/ui-btn.png?v=1a2b3c4d". Use this everywhere a stylesheet or a
+ *  template names an asset, or the next replacement is invisible again. */
+export const asset = (route: string): string =>
+  `${route}${ASSET_VERSION[route] ? `?v=${ASSET_VERSION[route]}` : ""}`;

@@ -51,7 +51,7 @@ export async function liveState(): Promise<Live> {
  */
 const FRAME = `
 .pbar{height:6px;background:rgba(0,0,0,.15);border-radius:3px;overflow:hidden;min-width:90px}
-.pbar > i{display:block;height:100%;background:#6b4fa0}
+.pbar > i{display:block;height:100%;background:linear-gradient(180deg,#d8ae63,#a8863f)}
 .tile-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
 @media(max-width:900px){.tile-row{grid-template-columns:repeat(2,1fr)}}
 `;
@@ -83,7 +83,7 @@ export async function downloadsPage(): Promise<string> {
        document.getElementById('active').innerHTML = d.active.length === 0
          ? '<div style="color:var(--ink-dim)">nothing in flight — the scheduler fetches a batch every 15 minutes</div>'
          : '<table><tr><th>series</th><th>chapter</th><th>pages</th><th>elapsed</th></tr>' + d.active.map(a =>
-             '<tr><td><a href="/series/'+a.seriesId+'" style="color:#4a3a7a">'+a.title+'</a></td>'+
+             '<tr><td><a href="/series/'+a.seriesId+'" class="series">'+a.title+'</a></td>'+
              '<td>ch '+a.chapter+'</td>'+
              '<td><div class="pbar"><i style="width:'+(a.total?Math.round(100*a.done/a.total):0)+'%"></i></div>'+
                '<span style="font-size:11px;color:var(--ink-dim)">'+(a.done||0)+'/'+(a.total||'?')+'</span></td>'+
@@ -91,7 +91,7 @@ export async function downloadsPage(): Promise<string> {
        document.getElementById('recent').innerHTML = d.recent.length === 0
          ? '<div style="color:var(--ink-dim)">nothing yet</div>'
          : '<table><tr><th>series</th><th>chapter</th><th>when</th></tr>' + d.recent.map(r =>
-             '<tr><td><a href="/series/'+r.seriesId+'" style="color:#4a3a7a">'+r.title+'</a></td>'+
+             '<tr><td><a href="/series/'+r.seriesId+'" class="series">'+r.title+'</a></td>'+
              '<td>ch '+r.chapter+'</td><td>'+rel(r.ago)+'</td></tr>').join('') + '</table>';
        document.getElementById('stuck').innerHTML = d.stuck.length === 0
          ? '<div class="dim">none</div>'

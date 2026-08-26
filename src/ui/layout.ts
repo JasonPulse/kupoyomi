@@ -143,12 +143,13 @@ select{color:var(--ink);font:12.5px/1.3 inherit;padding:6px 30px 6px 11px;
 input:focus,select:focus{outline:none;box-shadow:0 0 0 1px rgba(227,182,97,.45)}
 input::placeholder{color:var(--ink-faint)}
 
-/* Every anchor, including :visited. Without it the browser's own purple showed through
-   on a black panel, which is unreadable and was never a choice anyone made. */
-a,a:visited{color:var(--gold)}
+/* One colour for a link whether or not it has been followed. Whether I have opened a
+   series before is not information worth spending a colour on, and the browser's default
+   purple on a black panel is unreadable. */
+a,a:link,a:visited,a:active{color:var(--gold)}
 a:hover{color:#f6e6c6}
-.card a:visited,.tile a:visited{color:var(--gold-dim)}
-a.series,a.series:visited{color:var(--gold);text-decoration:none}
+.card a,.card a:visited,.tile a,.tile a:visited{color:var(--gold)}
+a.series,a.series:link,a.series:visited{color:var(--gold);text-decoration:none}
 a.series:hover{text-decoration:underline;color:#f6e6c6}
 .bar{height:6px;background:rgba(0,0,0,.5);border:1px solid rgba(227,182,97,.18);
   border-radius:2px;overflow:hidden;min-width:70px}

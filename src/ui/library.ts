@@ -23,7 +23,7 @@ const EXTRA = `
 .lc .pb{height:4px;background:#2a2a2a}
 .lc .pb > i{display:block;height:100%;background:#2b6}
 .vw{margin-bottom:12px}
-.vw a{color:#4a3a7a;text-decoration:none;font-size:12px;margin-right:12px}
+.vw a{color:var(--gold);text-decoration:none;font-size:12px;margin-right:12px}
 .vw a.on{color:var(--gold);font-weight:600}
 `;
 

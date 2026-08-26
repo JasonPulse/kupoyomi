@@ -63,9 +63,20 @@ main{padding:20px 20px 48px;max-width:1240px;margin:0 auto}
    part of it. Slice 40 keeps the ornament; the border is drawn at 26 so it compresses
    slightly rather than eating a small panel. */
 .card,.tile{position:relative;color:var(--ink);margin:0 0 18px;
-  background:rgba(18,16,15,.93);
+  /* BgGlow, stretched: a warm vignette so the middle of a panel is not the same flat
+     value as its edge. This layer is most of the difference between depth and a box. */
+  background:url(${asset('/ui2-glow.png')}) no-repeat center center/100% 100%,
+             linear-gradient(180deg,rgba(26,22,19,.95),rgba(14,12,11,.97));
   border:26px solid transparent;
   border-image:url(${asset('/ui2-corner.png')}) 40 fill stretch}
+/* BorderInner, inset: the line that separates the frame from the content and gives the
+   frame something to sit against. */
+.card::before,.tile::before{content:"";position:absolute;inset:-12px;pointer-events:none;
+  border:6px solid transparent;border-image:url(${asset('/ui2-inner.png')}) 2 stretch}
+/* Bottom: a bright accent under the panel, which is where the kit puts its emphasis. */
+.card::after{content:"";position:absolute;left:12%;right:12%;bottom:-19px;height:4px;
+  background:url(${asset('/ui2-bottom.png')}) no-repeat center/100% 100%;
+  opacity:.75;pointer-events:none}
 .card{padding:2px 8px;min-height:60px}
 .tile{padding:0;margin-bottom:0}
 /* ModalBox_Background.png, a heavier frame for something set inside a panel. */
@@ -75,10 +86,12 @@ main{padding:20px 20px 48px;max-width:1240px;margin:0 auto}
 .title{font-weight:600;margin-bottom:3px;color:#f3ece1;letter-spacing:.2px}
 .meta,.dim,.n{color:var(--ink-dim);font-size:12px}
 /* WINDOW TITLE: centred, uppercase, gold, over the kit's separator strip. */
-.card h2{font-size:12.5px;margin:-2px -6px 12px;padding:0 0 7px;font-weight:600;
+/* Popup_02_White_DecoLine, 571x17, sliced so its ends keep their shape while the middle
+   stretches. An ornamental rule under a heading, which is how the kit heads a section. */
+.card h2{font-size:12.5px;margin:0 -4px 14px;padding:0 0 14px;font-weight:600;
   color:var(--gold);letter-spacing:2px;text-transform:uppercase;text-align:center;
-  border-bottom:3px solid transparent;
-  border-image:url(${asset('/ui-sep.png')}) 0 1 3 1 stretch}
+  border-bottom:14px solid transparent;
+  border-image:url(${asset('/ui2-divider.png')}) 0 276 0 276 stretch}
 .card a,.tile a{color:var(--gold)}
 .rec{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
 table{border-collapse:collapse;width:100%;font-size:13px}
@@ -130,7 +143,12 @@ select{color:var(--ink);font:12.5px/1.3 inherit;padding:6px 30px 6px 11px;
 input:focus,select:focus{outline:none;box-shadow:0 0 0 1px rgba(227,182,97,.45)}
 input::placeholder{color:var(--ink-faint)}
 
-a.series{color:var(--gold);text-decoration:none}
+/* Every anchor, including :visited. Without it the browser's own purple showed through
+   on a black panel, which is unreadable and was never a choice anyone made. */
+a,a:visited{color:var(--gold)}
+a:hover{color:#f6e6c6}
+.card a:visited,.tile a:visited{color:var(--gold-dim)}
+a.series,a.series:visited{color:var(--gold);text-decoration:none}
 a.series:hover{text-decoration:underline;color:#f6e6c6}
 .bar{height:6px;background:rgba(0,0,0,.5);border:1px solid rgba(227,182,97,.18);
   border-radius:2px;overflow:hidden;min-width:70px}

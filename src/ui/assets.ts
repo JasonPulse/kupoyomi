@@ -25,14 +25,19 @@ export const ASSETS: Record<string, { body: Buffer; type: string } | undefined> 
     ["/ui-btn-press.png", "ui-btn-press.png", "image/png"],
     ["/ui-select.png", "ui-select.png", "image/png"],
     ["/ui-select-arrow.png", "ui-select-arrow.png", "image/png"],
-    ["/ui-sep.png", "ui-sep.png", "image/png"],
     ["/ui-tab-active.png", "ui-tab-active.png", "image/png"],
     ["/ui-header.png", "ui-header.png", "image/png"],
     ["/ui-bg.png", "ui-bg.png", "image/png"],
     // GUI Pro FantasyRPG. The ornate frame and the dark button, both from its own set.
     // The frame ships white with alpha so its colour is ours to choose; it is tinted to a
     // muted bronze rather than the pack's fantasy gold, which is the cartoonish part.
+    // The frame is a stack, not one image: fill, inner glow, inner line, outer frame with
+    // its corner work, and a bottom accent. Using only the frame is what made it flat.
     ["/ui2-corner.png", "ui2-corner.png", "image/png"],
+    ["/ui2-glow.png", "ui2-glow.png", "image/png"],
+    ["/ui2-inner.png", "ui2-inner.png", "image/png"],
+    ["/ui2-bottom.png", "ui2-bottom.png", "image/png"],
+    ["/ui2-divider.png", "ui2-divider.png", "image/png"],
     ["/ui2-btn.png", "ui2-btn.png", "image/png"],
   ] as const).flatMap(([route, file, type]) => {
     const body = load(file);

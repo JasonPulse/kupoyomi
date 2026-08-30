@@ -126,8 +126,8 @@ function render(g) {
           (repeated.has(r.sourceName) && r.url
             ? '<div class="dim" style="font-size:10.5px">'+String(r.url).slice(-40).replace(/</g,'&lt;')+'</div>'
             : '')+'</td>' +
-        '<td class="dim">'+(r.variant || '-')+'</td>' +
-        '<td class="'+(empty?'bad':thin||odd?'warn':known?'rec':'dim')+'">'+
+        '<td class="dim" data-l="release">'+(r.variant || '-')+'</td>' +
+        '<td data-l="chapters" class="'+(empty?'bad':thin||odd?'warn':known?'rec':'dim')+'">'+
           (failed ? '<span class="bad" title="'+String(r.failed).replace(/"/g,'&quot;')+'">?</span>'
                   : known ? r.chapters : '<span class="spin">checking</span>')+
           (known && r.highest ? '<div class="dim" style="font-size:10.5px">up to ch '+r.highest+'</div>' : '')+
@@ -136,12 +136,12 @@ function render(g) {
           '</td>' +
         (cmp ? (function(){
           const nb = r.newBeyond, fg = r.fillsGaps, nc = r.notCarried;
-          const cell = (v, cls) => '<td class="'+(v > 0 ? cls : 'dim')+'">'+
+          const cell = (v, cls, l) => '<td data-l="'+l+'" class="'+(v > 0 ? cls : 'dim')+'">'+
             (v === undefined ? '<span class="dim">-</span>' : v > 0 ? '+'+v : '0')+'</td>';
-          return cell(nb, 'rec') + cell(fg, 'rec') +
-            '<td class="dim">'+(nc === undefined ? '-' : nc > 0 ? nc : '-')+'</td>';
+          return cell(nb, 'rec', 'new') + cell(fg, 'rec', 'fills') +
+            '<td class="dim" data-l="not carried">'+(nc === undefined ? '-' : nc > 0 ? nc : '-')+'</td>';
         })() : '') +
-        '<td class="dim">'+(r.lastUpload || '-')+'</td>' +
+        '<td class="dim" data-l="latest">'+(r.lastUpload || '-')+'</td>' +
         '<td class="act"><a href="/preview?source='+
           encodeURIComponent(r.sourceId)+'&url='+encodeURIComponent(r.url)+'&title='+encodeURIComponent(r.title)+
           '" style="text-decoration:none"><button type="button" class="weak">details</button></a>' + (empty
@@ -310,6 +310,25 @@ table.srcs th:nth-child(4),table.srcs td:nth-child(4){width:110px}
 table.srcs th:nth-child(5),table.srcs td:nth-child(5){width:96px;text-align:right}
 /* Side by side, not stacked. Stacked, the details link sat directly above the add
    button and on a phone the two were a thumb-width apart. */
+table.srcs{width:100%}
+/* A source row is eight columns wide when it is comparing against a series you hold, and
+   no phone shows eight columns. Sideways scrolling made the add button the one thing
+   permanently off screen, which is the only thing the page is for. Under 700px each row
+   becomes a block: name on its own line, the numbers as labelled chips that wrap, the
+   button full width at the bottom. */
+@media(max-width:700px){
+  table.srcs,table.srcs tbody,table.srcs tr,table.srcs td{display:block;width:auto}
+  table.srcs tr:first-child{display:none}
+  table.srcs tr{padding:9px 0;border-top:1px solid #3a3226}
+  table.srcs td{max-width:none!important;width:auto!important;padding:0;border:0}
+  table.srcs td:first-child{font-weight:600;margin-bottom:4px}
+  table.srcs td[data-l]{display:inline-block;margin:0 12px 3px 0;font-size:12px;text-align:left}
+  table.srcs td[data-l]::before{content:attr(data-l) " ";color:var(--ink-dim);font-size:10.5px}
+  table.srcs td[data-l] div{display:inline;margin-left:4px}
+  table.srcs td.act{display:block;margin-top:7px;text-align:left;white-space:normal}
+  table.srcs td.act form{margin:0 0 0 6px}
+  table.srcs td.act button{padding:7px 14px}
+}
 td.act{text-align:right;white-space:nowrap}
 td.act > *{display:inline-block;vertical-align:middle}
 td.act form{display:inline-block;margin-left:6px}

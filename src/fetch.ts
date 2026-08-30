@@ -308,10 +308,24 @@ export async function fetchWanted(
 
         const images: Array<{ name: string; data: Buffer }> = [];
         for (const [i, rel] of pages.entries()) {
-          const res = await fetch(`${httpBase()}${rel}`, {
-            signal: AbortSignal.timeout(Number(process.env["PAGE_TIMEOUT_MS"] ?? 60_000)),
-          });
-          if (!res.ok) throw new Error(`page ${i} returned ${res.status}`);
+          // Every page URL points at our own Suwayomi, never at the source, so a
+          // status here is Suwayomi's answer about the source. Naming the layer
+          // matters: "page 3 returned 500" read as the site being down when it
+          // could equally have been the sidecar wedged or out of disk.
+          let res: Response;
+          try {
+            res = await fetch(`${httpBase()}${rel}`, {
+              signal: AbortSignal.timeout(Number(process.env["PAGE_TIMEOUT_MS"] ?? 60_000)),
+            });
+          } catch (e) {
+            throw new Error(`page ${i}: cannot reach suwayomi (${(e as Error).message})`);
+          }
+          if (!res.ok) {
+            // Suwayomi puts the upstream failure in the body. Dropping it was what
+            // made every stall look identical from the outside.
+            const said = (await res.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 180);
+            throw new Error(`page ${i}: suwayomi ${res.status}${said ? ` said ${said}` : " with an empty body"}`);
+          }
           const buf = Buffer.from(await res.arrayBuffer());
           const ext = (res.headers.get("content-type") ?? "").includes("png") ? "png"
             : (res.headers.get("content-type") ?? "").includes("webp") ? "webp" : "jpg";

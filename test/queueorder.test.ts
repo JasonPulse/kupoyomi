@@ -346,3 +346,38 @@ test("a chapter already in flight is not picked up twice", { skip: !haveDb }, as
 
   await p.query("UPDATE wanted SET state='pending', started_at=NULL WHERE series_id=$1", [id]);
 });
+
+/**
+ * A chapter that has just failed has to be visible somewhere.
+ *
+ * The downloads page showed three lists: in flight, done, and given up at the attempt
+ * limit. A chapter that had just failed its first attempt was in none of them, so pressing
+ * retry and watching it fail made it vanish from the page you were watching. It was in the
+ * database the whole time, which is why "the chapter disappeared" was so hard to pin down.
+ */
+test("a chapter that just failed appears in the recent list", { skip: !haveDb }, async () => {
+  const { liveState } = await import("../src/ui/downloads.js");
+  const p = db();
+  const id = ids.get("Zebra Chronicle")!;
+  await p.query("UPDATE wanted SET state='pending', attempts=0, retry_after=NULL, started_at=NULL WHERE series_id=$1", [id]);
+
+  // Exactly the state a first failure leaves behind: short of the limit, waiting to retry.
+  await p.query(
+    `UPDATE wanted SET state='failed', attempts=1, started_at=now() - interval '2 minutes',
+       retry_after=now() + interval '13 minutes', last_error='page 3 returned 500'
+      WHERE series_id=$1 AND chapter_number=1`, [id]);
+
+  const live = await liveState();
+  const row = live.recent.find((r) => r.seriesId === id && Number(r.chapter) === 1);
+  assert.ok(row, "a chapter that just failed must be on the page, not only in the database");
+  assert.equal(row!.ok, false);
+  assert.match(row!.error ?? "", /page 3 returned 500/, "with the reason it failed");
+  assert.ok((row!.retryIn ?? 0) > 0, "and when it will be tried again");
+
+  assert.ok(!live.active.some((r) => r.seriesId === id && Number(r.chapter) === 1),
+    "it is not in flight");
+  assert.ok(!live.stuck.some((r) => r.seriesId === id && Number(r.chapter) === 1),
+    "and it has not given up either, which is why it fell through every list");
+
+  await p.query("UPDATE wanted SET state='pending', attempts=0, retry_after=NULL, started_at=NULL, last_error=NULL WHERE series_id=$1", [id]);
+});

@@ -4,7 +4,8 @@ import { fmt } from "../held.js";
 
 export type Live = {
   active: Array<{ title: string; seriesId: number; chapter: string; done: number | null; total: number | null; secs: number }>;
-  recent: Array<{ title: string; seriesId: number; chapter: string; ago: number }>;
+  recent: Array<{ title: string; seriesId: number; chapter: string; ago: number;
+    ok: boolean; error: string | null; retryIn: number | null }>;
   stuck: Array<{ title: string; seriesId: number; chapter: string; attempts: number; error: string | null }>;
   counts: { pending: number; fetching: number; failed: number; done: number };
   rate: { lastHour: number; lastDay: number };
@@ -17,16 +18,25 @@ export async function liveState(): Promise<Live> {
             EXTRACT(EPOCH FROM (now() - w.started_at))::int::text AS secs
        FROM wanted w JOIN series s ON s.id = w.series_id
       WHERE w.state = 'fetching' ORDER BY w.started_at`)).rows;
-  const recent = (await p.query<{ title: string; series_id: number; chapter_number: string; ago: string }>(
+  // Failures belong here beside the successes. A chapter that had just failed appeared
+  // in none of these three lists: not in flight, not done, and short of the attempt limit
+  // so not given up either. Press retry, watch it fail, and it vanishes off the page you
+  // are looking at, which is exactly what "the chapter disappeared" was.
+  const recent = (await p.query<{ title: string; series_id: number; chapter_number: string; ago: string; ok: boolean; last_error: string | null; retry_in: string | null }>(
     `SELECT s.title, w.series_id, w.chapter_number,
-            EXTRACT(EPOCH FROM (now() - w.finished_at))::int::text AS ago
+            EXTRACT(EPOCH FROM (now() - COALESCE(w.finished_at, w.started_at)))::int::text AS ago,
+            (w.state = 'done') AS ok, w.last_error,
+            CASE WHEN w.retry_after > now()
+                 THEN EXTRACT(EPOCH FROM (w.retry_after - now()))::int::text END AS retry_in
        FROM wanted w JOIN series s ON s.id = w.series_id
-      WHERE w.state = 'done' AND w.finished_at IS NOT NULL
-      ORDER BY w.finished_at DESC LIMIT 12`)).rows;
+      WHERE (w.state = 'done' AND w.finished_at IS NOT NULL)
+         OR (w.state = 'failed' AND w.started_at > now() - interval '6 hours')
+      ORDER BY COALESCE(w.finished_at, w.started_at) DESC LIMIT 16`)).rows;
   const stuck = (await p.query<{ title: string; series_id: number; chapter_number: string; attempts: number; last_error: string | null }>(
     `SELECT s.title, w.series_id, w.chapter_number, w.attempts, w.last_error
        FROM wanted w JOIN series s ON s.id = w.series_id
-      WHERE w.state = 'failed' AND w.attempts >= 4 ORDER BY s.title LIMIT 12`)).rows;
+      WHERE w.state = 'failed' AND w.attempts >= ${Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6))}
+      ORDER BY s.title LIMIT 12`)).rows;
   const c = (await p.query<{ state: string; n: string }>("SELECT state, count(*) n FROM wanted GROUP BY state")).rows;
   const at = (st: string): number => Number(c.find((x) => x.state === st)?.n ?? 0);
   const rate = (await p.query<{ h: string; d: string }>(
@@ -37,7 +47,9 @@ export async function liveState(): Promise<Live> {
   return {
     active: active.map((r) => ({ title: r.title, seriesId: r.series_id, chapter: r.chapter_number,
       done: r.pages_done, total: r.pages_total, secs: Number(r.secs) })),
-    recent: recent.map((r) => ({ title: r.title, seriesId: r.series_id, chapter: r.chapter_number, ago: Number(r.ago) })),
+    recent: recent.map((r) => ({ title: r.title, seriesId: r.series_id, chapter: r.chapter_number,
+      ago: Number(r.ago), ok: r.ok, error: r.last_error,
+      retryIn: r.retry_in === null ? null : Number(r.retry_in) })),
     stuck: stuck.map((r) => ({ title: r.title, seriesId: r.series_id, chapter: r.chapter_number,
       attempts: r.attempts, error: r.last_error })),
     counts: { pending: at("pending"), fetching: at("fetching"), failed: at("failed"), done: at("done") },
@@ -70,7 +82,7 @@ export async function downloadsPage(): Promise<string> {
          <span class="n" id="t-stuck-wrap"> &middot; <span id="t-stuck">${s.stuck.length}</span> given up</span></div>
      </div>
      ${news("Downloading now", '<div id="active"></div>')}
-     ${news("Just finished", '<div id="recent"></div>')}
+     ${news("Recently attempted", '<div id="recent"></div>')}
      <div class="card"><div class="title">Given up after 4 attempts</div><div id="stuck"></div></div>
      <script>
      function rel(s){ return s<60 ? s+'s ago' : s<3600 ? Math.round(s/60)+'m ago' : Math.round(s/3600)+'h ago'; }
@@ -90,9 +102,16 @@ export async function downloadsPage(): Promise<string> {
              '<td>'+a.secs+'s</td></tr>').join('') + '</table>';
        document.getElementById('recent').innerHTML = d.recent.length === 0
          ? '<div style="color:var(--ink-dim)">nothing yet</div>'
-         : '<table><tr><th>series</th><th>chapter</th><th>when</th></tr>' + d.recent.map(r =>
+         : '<table><tr><th>series</th><th>chapter</th><th>when</th><th>result</th></tr>' + d.recent.map(r =>
              '<tr><td><a href="/series/'+r.seriesId+'" class="series">'+r.title+'</a></td>'+
-             '<td>ch '+r.chapter+'</td><td>'+rel(r.ago)+'</td></tr>').join('') + '</table>';
+             '<td>ch '+r.chapter+'</td><td>'+rel(r.ago)+'</td>'+
+             '<td class="'+(r.ok?'rec':'bad')+'" style="font-size:11.5px">'+
+               (r.ok ? 'done'
+                     : (r.error||'failed').slice(0,52) +
+                       (r.retryIn ? ' <span class="dim">retrying in '+
+                         (r.retryIn<3600 ? Math.round(r.retryIn/60)+'m' : Math.round(r.retryIn/3600)+'h')+'</span>'
+                                  : ''))+
+             '</td></tr>').join('') + '</table>';
        document.getElementById('stuck').innerHTML = d.stuck.length === 0
          ? '<div class="dim">none</div>'
          : '<table><tr><th>series</th><th>chapter</th><th>tries</th><th>error</th></tr>' + d.stuck.map(r =>

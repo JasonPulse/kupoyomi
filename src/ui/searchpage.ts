@@ -293,7 +293,7 @@ const EXTRA_CSS = `
 /* On a phone the cover floats and the text flows around and under it. A flex row cannot
    do that: the synopsis is stuck in a column beside a fixed-width cover, which on a
    390px screen left about four words per line and a page of scrolling. */
-@media(max-width:700px){
+@media(max-width:950px){
   .srch-head{display:block;margin-bottom:9px}
   .srch-head::after{content:"";display:table;clear:both}
   .cover{float:left;width:104px;height:150px;margin:0 11px 6px 0}
@@ -313,20 +313,35 @@ table.srcs th:nth-child(5),table.srcs td:nth-child(5){width:96px;text-align:righ
 table.srcs{width:100%}
 /* A source row is eight columns wide when it is comparing against a series you hold, and
    no phone shows eight columns. Sideways scrolling made the add button the one thing
-   permanently off screen, which is the only thing the page is for. Under 700px each row
-   becomes a block: name on its own line, the numbers as labelled chips that wrap, the
-   button full width at the bottom. */
-@media(max-width:700px){
+   permanently off screen, which is the only thing the page is for.
+   A phone is two sizes, not one. Portrait is about 390px and landscape is 844 to 932,
+   so a single 700px breakpoint fixed the page upright and threw it back to eight columns
+   the moment you turned the phone over. Both sizes drop the table grid. What differs is
+   how much fits on a line. */
+@media(max-width:950px){
   table.srcs,table.srcs tbody,table.srcs tr,table.srcs td{display:block;width:auto}
   table.srcs tr:first-child{display:none}
   table.srcs tr{padding:9px 0;border-top:1px solid #3a3226}
   table.srcs td{max-width:none!important;width:auto!important;padding:0;border:0}
-  table.srcs td:first-child{font-weight:600;margin-bottom:4px}
+  table.srcs td:first-child{font-weight:600;min-width:0}
   table.srcs td[data-l]{display:inline-block;margin:0 12px 3px 0;font-size:12px;text-align:left}
   table.srcs td[data-l]::before{content:attr(data-l) " ";color:var(--ink-dim);font-size:10.5px}
   table.srcs td[data-l] div{display:inline;margin-left:4px}
-  table.srcs td.act{display:block;margin-top:7px;text-align:left;white-space:normal}
-  table.srcs td.act form{margin:0 0 0 6px}
+  table.srcs td.act{text-align:left;white-space:normal}
+}
+/* Landscape has room for two lines. Name and buttons share the first, the numbers wrap
+   onto the second, and nothing needs a full-width button to stay reachable. */
+@media(min-width:561px) and (max-width:950px){
+  table.srcs tr{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:12px}
+  table.srcs td:first-child{flex:1 1 auto}
+  table.srcs td.act{flex:0 0 auto;order:1;margin:0}
+  table.srcs td[data-l]{order:2}
+}
+/* Portrait fits one thing per line. The button goes full width at the bottom of the row,
+   where a thumb reaches it. */
+@media(max-width:560px){
+  table.srcs td:first-child{margin-bottom:4px}
+  table.srcs td.act{display:block;margin-top:7px}
   table.srcs td.act button{padding:7px 14px}
 }
 td.act{text-align:right;white-space:nowrap}

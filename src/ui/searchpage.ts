@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { healthMap } from "../health.js";
 import { esc, page } from "./layout.js";
 
 const CLIENT = String.raw`
@@ -50,6 +51,15 @@ function relevance(title) {
   if (words.length && hits === words.length) return 3;
   return 4;
 }
+// Prefer an English release over a translated one.
+const en = r => /english/i.test(r.variant||'') ? 0 : 1;
+// What a source is worth: the chapters it lists, discounted by how often it actually
+// delivers one when asked. Sorting on the advertised count alone kept putting Comic
+// Asura at the top, where it was picked most often, while it landed 54% of its attempts
+// and held 15 of the library's 17 outright failures. A source needing two tries per
+// chapter is worth half the chapters it lists. An unmeasured source is not penalised.
+const worth = r => (r.chapters ?? -1) * (window.HEALTH[r.sourceName] ?? 1);
+
 function render(g) {
   // The comparison numbers are against whichever series the page is working for. In
   // target mode that is the same series for every card, so the columns are labelled with
@@ -65,9 +75,7 @@ function render(g) {
     el.appendChild(card);
   }
   card.style.order = relevance(g.title);
-  // Most chapters first, then prefer an English release over a translated one.
-  const en = r => /english/i.test(r.variant||'') ? 0 : 1;
-  const sorted = [...g.rows].sort((a,b)=>(b.chapters??-1)-(a.chapters??-1) || en(a)-en(b));
+  const sorted = [...g.rows].sort((a,b)=>worth(b)-worth(a) || en(a)-en(b));
   // A site listing the same series twice under the same name is a duplicate row, not a
   // choice. MangaToday returned two entries, both 125 chapters and both 2024-01-02, and
   // the only difference was that one named a scanlator. Rows that agree on source,
@@ -123,6 +131,9 @@ function render(g) {
       const padded = known && r.total > r.chapters * 1.15;
       return '<tr>' +
         '<td>'+r.sourceName+(r.nsfw?' <span class="dim">18+</span>':'')+
+          (window.HEALTH[r.sourceName] !== undefined && window.HEALTH[r.sourceName] < 0.9
+            ? '<div class="warn" style="font-size:10.5px">'+
+              Math.round(window.HEALTH[r.sourceName]*100)+'% of downloads from here land first try</div>' : '')+
           (repeated.has(r.sourceName) && r.url
             ? '<div class="dim" style="font-size:10.5px">'+String(r.url).slice(-40).replace(/</g,'&lt;')+'</div>'
             : '')+'</td>' +
@@ -361,6 +372,9 @@ export async function searchPage(query?: string, seriesId?: number): Promise<str
       "SELECT series_id AS id, alias AS name FROM series_alias")).rows,
   ].map((r) => [r.name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(), r.id]));
 
+  // What each source has actually managed to deliver, which is what ranks them.
+  const health = await healthMap();
+
   // Choosing a source FOR a series, rather than searching for something new.
   //
   // Matching a source's title against the library cannot close the duplicate hole. The
@@ -399,6 +413,6 @@ export async function searchPage(query?: string, seriesId?: number): Promise<str
 
   return page("search", target ? `choosing a source for ${target.title}` : "global search",
     `<style>${EXTRA_CSS}</style>${form}<div id="results"></div>
-     <script>window.HAVE=${JSON.stringify(have)};window.TARGET=${target ? target.id : "null"};</script>
+     <script>window.HAVE=${JSON.stringify(have)};window.TARGET=${target ? target.id : "null"};window.HEALTH=${JSON.stringify(health)};</script>
      <script>${CLIENT}</script>`);
 }

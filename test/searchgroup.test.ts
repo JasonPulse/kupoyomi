@@ -22,12 +22,14 @@ assert.ok(upTo > 0, "the EventSource wiring is still the boundary of the testabl
 
 const stubs = "const location={search:'?q=x'};"
   + "const document={getElementById:()=>null,createElement:()=>({}),addEventListener:()=>{}};"
-  + "const window={HAVE:{}};";
-const fns = new Function(`${stubs}\n${block.slice(0, upTo)}\nreturn { workKey, variantOf, mergeKey, norm };`)() as {
+  + "const window={HAVE:{},HEALTH:{'Comic Asura (EN)':0.542,'MangaK (EN)':1}};";
+const fns = new Function(`${stubs}\n${block.slice(0, upTo)}\nreturn { workKey, variantOf, mergeKey, norm, worth, en };`)() as {
   workKey: (s: string) => string;
   variantOf: (s: string) => string;
   mergeKey: (k: string) => string;
   norm: (s: string) => string;
+  worth: (r: { chapters: number | null; sourceName: string }) => number;
+  en: (r: { variant?: string }) => number;
 };
 
 test("editions of one work group together", () => {
@@ -91,4 +93,30 @@ test("the title searched for outranks a loose match", () => {
 test("ranking is a total order, so ties keep arrival order", () => {
   // Two loose matches must score the same rather than one jumping the other arbitrarily.
   assert.equal(rel("Some Other Thing"), rel("Another Thing Entirely"));
+});
+
+/**
+ * Ranking a source on the count it advertises put Comic Asura at the top of nearly every
+ * result, so it got picked most often, while it landed 54% of what it was asked for and
+ * held 15 of the library's 17 outright failures. The count is now discounted by that.
+ */
+test("a flaky source ranks below a reliable one holding fewer chapters", () => {
+  const asura = { sourceName: "Comic Asura (EN)", chapters: 200 };
+  const mangak = { sourceName: "MangaK (EN)", chapters: 150 };
+  assert.ok(fns.worth(asura) < fns.worth(mangak),
+    `asura ${fns.worth(asura)} should rank below mangak ${fns.worth(mangak)}`);
+  // Sorted the way the page sorts, the reliable source comes first.
+  const sorted = [asura, mangak].sort((a, b) => fns.worth(b) - fns.worth(a));
+  assert.equal(sorted[0]?.sourceName, "MangaK (EN)");
+});
+
+test("a big enough lead still beats a reliability penalty", () => {
+  // The penalty is a discount, not a ban. Asura carrying three times the chapters is
+  // still the right pick, and burying it there would cost real chapters.
+  assert.ok(fns.worth({ sourceName: "Comic Asura (EN)", chapters: 400 })
+          > fns.worth({ sourceName: "MangaK (EN)", chapters: 150 }));
+});
+
+test("an unmeasured source is not penalised", () => {
+  assert.equal(fns.worth({ sourceName: "Never Used (EN)", chapters: 100 }), 100);
 });

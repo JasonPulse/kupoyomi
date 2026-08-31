@@ -239,6 +239,19 @@ const main = async (): Promise<void> => {
       console.log(`${process.argv.includes("--ignore") ? "ignoring" : "linked"} ${path} for series ${sid}`);
       break;
     }
+    case "health": {
+      const { sourceHealth, MIN_SAMPLE } = await import("./health.js");
+      const all = await sourceHealth();
+      for (const h of all) {
+        const rate = h.landed === null ? "  too few" : `${(h.landed * 100).toFixed(1)}%`;
+        console.log(`${rate.padStart(8)}  ${h.sourceName.padEnd(24)} ` +
+          `${h.done} landed, ${h.failed} failed, ${h.attempts} attempts`);
+      }
+      console.log(`\n${all.length} sources, rate is chapters delivered per attempt, ` +
+        `blank under ${MIN_SAMPLE} attempts`);
+      await closeDb();
+      break;
+    }
     case "paid": {
       const { purgePaidSources } = await import("./paid.js");
       await purgePaidSources({ dryRun: process.argv.includes("--dry-run") });

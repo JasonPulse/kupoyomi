@@ -394,8 +394,10 @@ test("a chapter that just failed appears in the recent list", { skip: !haveDb },
  */
 test("a series parked after repeated failures stops monopolising the queue", { skip: !haveDb }, async () => {
   const p = db();
-  const dead = ids.get("Alpha Saga")!;
-  const other = ids.get("Zebra Chronicle")!;
+  // Aardvark sorts first, so it wins the tie inside block 0 and fills the batch on
+  // its own. Middle Tale is the series starving behind it.
+  const dead = ids.get("Aardvark Saga")!;
+  const other = ids.get("Middle Tale")!;
   await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
   await p.query("UPDATE wanted SET state='pending', attempts=0, retry_after=NULL, started_at=NULL");
 

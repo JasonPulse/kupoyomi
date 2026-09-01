@@ -79,11 +79,11 @@ export async function downloadsPage(): Promise<string> {
        <div class="tile"><div class="n">queued</div><b style="font-size:20px" id="t-pending">${s.counts.pending}</b></div>
        <div class="tile"><div class="n">done, last hour</div><b style="font-size:20px" id="t-hour">${s.rate.lastHour}</b></div>
        <div class="tile"><div class="n">done, last day</div><b style="font-size:20px" id="t-day">${s.rate.lastDay}</b>
-         <span class="n" id="t-stuck-wrap"> &middot; <span id="t-stuck">${s.stuck.length}</span> given up</span></div>
+         <span class="n" id="t-stuck-wrap"> &middot; <span id="t-stuck">${s.stuck.length}</span> out of attempts</span></div>
      </div>
      ${news("Downloading now", '<div id="active"></div>')}
      ${news("Recently attempted", '<div id="recent"></div>')}
-     <div class="card"><div class="title">Given up after 4 attempts</div><div id="stuck"></div></div>
+     <div class="card"><div class="title">Out of attempts, waiting for another try</div><div id="stuck"></div></div>
      <script>
      function rel(s){ return s<60 ? s+'s ago' : s<3600 ? Math.round(s/60)+'m ago' : Math.round(s/3600)+'h ago'; }
      function paint(d){

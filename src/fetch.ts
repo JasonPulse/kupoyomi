@@ -119,6 +119,10 @@ export async function nextWanted(
   /** One named chapter, bypassing the rotation entirely. A manual retry is a request to
    *  fetch that chapter now, not a request to join a queue. */
   only?: { seriesId: number; chapter: string },
+  /** How long a chapter that has spent all its attempts waits before it gets one more.
+   *  Two days by default. A tick with nothing else queued passes something shorter,
+   *  because on an idle day the slot costs nothing. */
+  deadAfterHours?: number,
 ): Promise<WantedRow[]> {
   if (only) {
     return (await db().query<WantedRow>(
@@ -132,6 +136,7 @@ export async function nextWanted(
   }
   const block = Math.max(1, Number(blockSize ?? process.env["FETCH_BLOCK"] ?? 25));
   const maxAttempts = Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6));
+  const deadAfter = Math.max(1, Number(deadAfterHours ?? 48));
   // Round-robin by block, not one series start to finish.
   //
   // Ordering by title alone drained the alphabetically-first series completely before
@@ -164,7 +169,14 @@ export async function nextWanted(
               row_number() OVER (PARTITION BY w.series_id ORDER BY w.chapter_number) - 1 AS idx
          FROM wanted w
          JOIN series s ON s.id = w.series_id
-        WHERE w.state IN ('pending','failed','fetching') AND w.attempts < ${maxAttempts}
+        WHERE w.state IN ('pending','failed','fetching')
+          -- Spending every attempt used to be final until somebody pressed retry, so a
+          -- source that was down for an afternoon cost those chapters permanently. Age
+          -- brings them back for one more try instead. Deliberately not a reset of
+          -- attempts: the count is what the source health metric is measured from, and
+          -- zeroing it would quietly forgive the record it is meant to keep.
+          AND (w.attempts < ${maxAttempts}
+               OR COALESCE(w.started_at, w.queued_at) < now() - interval '${deadAfter} hours')
           -- A row waiting out its backoff is not a candidate yet.
           AND (w.retry_after IS NULL OR w.retry_after <= now())
           -- Nor is one genuinely in flight. A manual retry runs outside the scheduler, so
@@ -174,18 +186,46 @@ export async function nextWanted(
           -- A muted series is one the owner has told to stop. Its backlog is deleted when
           -- it stops, so this is a backstop against rows arriving by another route.
           AND NOT s.muted
+     ),
+     picked AS (
+       SELECT q.series_id, q.chapter_number, q.title,
+              (q.served + q.idx) / ${block} AS turn
+         FROM q
+        -- served + position is the row's turn, and the sum is what makes it hold still.
+        -- Serving a chapter raises served by one and drops that row, which shifts every
+        -- later row's position down by one, so the sum is unchanged. Ranking on position
+        -- alone let a series keep turn 0 forever; ranking on served alone let a series that
+        -- took a partial block take a full one straight after, so Justice for the Villainess
+        -- got 38 chapters in what was meant to be a turn of 25.
+        ORDER BY (q.served + q.idx) / ${block}, q.title, q.chapter_number
+        ${limit ? `LIMIT ${Number(limit)}` : ""}
+     ),
+     -- Claimed in the same statement that picks them, which is the whole point. The
+     -- filter above already skipped rows marked fetching, but nothing marked them until
+     -- after every page had been downloaded, tens of seconds later. Two loops running at
+     -- once therefore both saw the same rows as pending and fetched the same chapter
+     -- twice; whichever renamed second found the shared temp file already moved and
+     -- reported ENOENT against a chapter sitting correctly on disk. A claim taken after
+     -- the work is not a claim.
+     --
+     -- No explicit lock: an UPDATE locks each row it touches, so a second statement
+     -- arriving at the same row waits, re-checks this WHERE once the first commits, sees
+     -- the fresh fetching mark and declines to take it.
+     claimed AS (
+       UPDATE wanted w SET state = 'fetching', started_at = now()
+         FROM picked p, series_binding b, series s
+        WHERE w.series_id = p.series_id AND w.chapter_number = p.chapter_number
+          AND b.id = w.binding_id AND s.id = w.series_id
+          AND NOT (w.state = 'fetching' AND w.started_at > now() - interval '5 minutes')
+       RETURNING w.series_id, w.chapter_number, w.binding_id, b.source_id, b.source_name,
+                 b.source_url, s.title, s.folder, w.attempts, p.turn
      )
-     SELECT q.series_id, q.chapter_number, q.binding_id, b.source_id, b.source_name,
-            b.source_url, q.title, q.folder, q.attempts
-       FROM q JOIN series_binding b ON b.id = q.binding_id
-      -- served + position is the row's turn, and the sum is what makes it hold still.
-      -- Serving a chapter raises served by one and drops that row, which shifts every
-      -- later row's position down by one, so the sum is unchanged. Ranking on position
-      -- alone let a series keep turn 0 forever; ranking on served alone let a series that
-      -- took a partial block take a full one straight after, so Justice for the Villainess
-      -- got 38 chapters in what was meant to be a turn of 25.
-      ORDER BY (q.served + q.idx) / ${block}, q.title, q.chapter_number
-      ${limit ? `LIMIT ${Number(limit)}` : ""}`)).rows;
+     -- RETURNING hands rows back in whatever order the update touched them, so the turn
+     -- is carried through and the order restored here. The caller reads this as the
+     -- serving order and the strike counter counts failures consecutively along it.
+     SELECT series_id, chapter_number, binding_id, source_id, source_name,
+            source_url, title, folder, attempts
+       FROM claimed ORDER BY turn, title, chapter_number`)).rows;
 }
 
 /**
@@ -254,7 +294,14 @@ export async function fetchWanted(
   // Not for a single named chapter: reclaiming is for rows a dead process left behind, and
   // this row was just handed over deliberately.
   if (!opts.only) await reclaimStuck(Number(process.env["FETCH_STUCK_MINUTES"] ?? 30));
-  const rows = opts.only ? await nextWanted(undefined, undefined, opts.only) : await nextWanted(opts.limit);
+  let rows = opts.only ? await nextWanted(undefined, undefined, opts.only) : await nextWanted(opts.limit);
+  // An empty queue is the right moment to look again at what gave up. The library will
+  // not always be downloading, and a chapter waiting two days for another try can have
+  // it now when there is nothing else to spend the slot on.
+  if (!opts.only && rows.length === 0) {
+    rows = await nextWanted(opts.limit, undefined, undefined, 6);
+    if (rows.length > 0) console.log(`nothing else queued, so retrying ${rows.length} that had given up`);
+  }
   if (rows.length === 0) { console.log("nothing queued"); return; }
 
   const bySource = new Map<string, typeof rows>();
@@ -348,7 +395,11 @@ export async function fetchWanted(
         mkdirSync(dirname(dest), { recursive: true });
         // Written to a temporary name and renamed, so a page failing part-way through
         // can never leave a truncated archive that later looks complete.
-        const tmp = `${dest}.part`;
+        // Unique per process. A shared `.part` name meant that if two downloaders ever
+        // did land on the same chapter, the one that renamed second failed with ENOENT
+        // on a file its sibling had already moved into place, recording a failure for a
+        // chapter that was sitting correctly on disk.
+        const tmp = `${dest}.${process.pid}.part`;
         writeFileSync(tmp, cbz);
         renameSync(tmp, dest);
         bytes += cbz.length;

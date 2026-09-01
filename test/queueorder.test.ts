@@ -1,4 +1,4 @@
-import { test, before, after } from "node:test";
+import { test, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,6 +49,22 @@ before(async () => {
         [id, n, b.rows[0]!.id]);
     }
   }
+});
+
+/**
+ * Selection claims what it hands out, marking each row 'fetching' in the same statement,
+ * so calling it twice does not return the same chapter twice. In production one tick runs
+ * at a time and reclaimStuck releases anything a dead process left behind. Here the tests
+ * share a database and several of them call selection with no limit, which claims every
+ * row and leaves nothing for the test after. Each one starts from a clean queue.
+ */
+beforeEach(async () => {
+  if (!haveDb) return;
+  const p = db();
+  await p.query(
+    `UPDATE wanted SET state='pending', attempts=0, retry_after=NULL, started_at=NULL
+      WHERE series_id = ANY($1)`, [[...ids.values()]]);
+  await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
 });
 
 after(async () => {
@@ -424,4 +440,67 @@ test("a series parked after repeated failures stops monopolising the queue", { s
   assert.ok(Number(owed.rows[0]!.n) > 0, "nothing was dropped, only deferred");
 
   await p.query("UPDATE wanted SET retry_after=NULL");
+});
+
+/**
+ * Two downloaders must never be handed the same chapter.
+ *
+ * Selection filtered out rows marked 'fetching', but nothing marked them until after every
+ * page had been downloaded, tens of seconds later. So two loops running at once both read
+ * the same rows as pending and fetched the same chapter twice. They also shared a temp
+ * filename, so whichever renamed second failed with ENOENT against a file its sibling had
+ * already moved into place: a recorded failure for a chapter sitting correctly on disk.
+ * That is what "The Despised Level 0 Incompetent Explorer" chapters 4 and 6 were.
+ */
+test("two selections at once never hand out the same chapter", { skip: !haveDb }, async () => {
+  const [a, b] = await Promise.all([nextWanted(5, 25), nextWanted(5, 25)]);
+  assert.ok(a.length > 0, "the first selection got work");
+
+  const key = (r: { series_id: number; chapter_number: string }) => `${r.series_id}:${r.chapter_number}`;
+  const overlap = a.map(key).filter((k) => b.map(key).includes(k));
+  assert.deepEqual(overlap, [],
+    `the same chapter was handed to both callers: ${overlap.join(", ")}`);
+
+  // And what was handed out is marked as owned, not left looking available.
+  const claimed = await db().query<{ n: string }>(
+    `SELECT count(*) n FROM wanted WHERE state='fetching'
+       AND (series_id, chapter_number) IN (${a.map((r) => `(${r.series_id},${r.chapter_number})`).join(",")})`);
+  assert.equal(Number(claimed.rows[0]!.n), a.length,
+    "every row handed over is marked fetching, so nothing else can take it");
+});
+
+/**
+ * Spending every attempt used to be permanent until somebody pressed retry, so a source
+ * down for an afternoon cost those chapters until they were noticed by hand. Age brings
+ * them back, and an idle queue brings them back sooner, because there is nothing else to
+ * spend the slot on.
+ */
+test("a chapter that gave up gets another try once it is old enough", { skip: !haveDb }, async () => {
+  const p = db();
+  const id = ids.get("Zebra Chronicle")!;
+  const has = async (hours?: number) =>
+    (await nextWanted(undefined, 25, undefined, hours)).some(
+      (r) => r.series_id === id && Number(r.chapter_number) === 3);
+
+  // Out of attempts, and it failed an hour ago.
+  await p.query(
+    `UPDATE wanted SET state='failed', attempts=6, retry_after=NULL, started_at = now() - interval '1 hour'
+      WHERE series_id=$1 AND chapter_number=3`, [id]);
+  assert.equal(await has(), false, "fresh out of attempts, it waits");
+
+  // Three days later the normal queue offers it again, without forgiving its record.
+  await p.query(
+    "UPDATE wanted SET started_at = now() - interval '3 days' WHERE series_id=$1 AND chapter_number=3", [id]);
+  assert.equal(await has(), true, "two days later it is offered again");
+  const still = await p.query<{ attempts: number }>(
+    "SELECT attempts FROM wanted WHERE series_id=$1 AND chapter_number=3", [id]);
+  assert.equal(still.rows[0]!.attempts, 6,
+    "its attempt count is intact, or the source health metric would be forgiving itself");
+
+  // And an idle tick, which passes a shorter threshold, takes it at eight hours old.
+  await p.query(
+    `UPDATE wanted SET state='failed', attempts=6, started_at = now() - interval '8 hours'
+      WHERE series_id=$1 AND chapter_number=3`, [id]);
+  assert.equal(await has(), false, "not yet, on a normal tick");
+  assert.equal(await has(6), true, "but an idle tick has nothing better to do");
 });

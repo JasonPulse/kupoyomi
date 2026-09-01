@@ -388,7 +388,20 @@ export async function fetchWanted(
         const n = (strikes.get(it.series_id) ?? 0) + 1;
         strikes.set(it.series_id, n);
         if (n === giveUpAfter) {
-          console.log(`  -- ${it.title.slice(0, 34)}: ${n} failures in a row, leaving the rest of it for the next run`);
+          // Parked, not merely noted. The strike counter lived in a Map for the duration
+          // of one run, so the next run re-selected the same dead series, spent its three
+          // strikes on three fresh chapters and skipped the rest of the batch. Mf Ghost
+          // against a Mangabat CDN that was down held the whole downloader for ninety
+          // minutes: 24 attempts, zero chapters, and no other series even considered,
+          // which is what left series added hours earlier still on nothing. Giving up on
+          // a series has to outlive the run that decided it.
+          const park = await p.query(
+            `UPDATE wanted SET retry_after = now() + interval '60 minutes'
+              WHERE series_id = $1 AND state IN ('pending','failed')
+                AND (retry_after IS NULL OR retry_after < now() + interval '60 minutes')`,
+            [it.series_id]);
+          console.log(`  -- ${it.title.slice(0, 34)}: ${n} failures in a row, ` +
+            `${park.rowCount} chapters parked for an hour so the rest of the library runs`);
         }
         const msg = err instanceof Error ? err.message.slice(0, 300) : String(err);
         // Minutes, then an hour, then six, then a day. Four attempts used to fit inside
@@ -413,7 +426,8 @@ export async function fetchWanted(
   const reset = await p.query(
     `UPDATE series SET served = 0 WHERE served > 0 AND NOT EXISTS (
        SELECT 1 FROM wanted w WHERE w.series_id = series.id
-         AND w.state IN ('pending','failed','fetching') AND w.attempts < 4)`);
+         AND w.state IN ('pending','failed','fetching')
+         AND w.attempts < ${Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6))})`);
   console.log(`\ndownloaded ${done}, failed ${failed}, ${(bytes / 1048576).toFixed(0)}MB` +
     (skipped > 0 ? `, ${skipped} left for the next run behind a series that kept failing` : "") +
     ((reset.rowCount ?? 0) > 0 ? `, ${reset.rowCount} finished their backlog and rejoin at the front` : ""));

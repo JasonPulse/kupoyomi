@@ -381,3 +381,45 @@ test("a chapter that just failed appears in the recent list", { skip: !haveDb },
 
   await p.query("UPDATE wanted SET state='pending', attempts=0, retry_after=NULL, started_at=NULL, last_error=NULL WHERE series_id=$1", [id]);
 });
+
+/**
+ * Giving up on a series has to outlive the run that decided it.
+ *
+ * The strike counter lived in a Map for the duration of one run, so the next run selected
+ * the same dead series, spent its three strikes on three fresh chapters, and skipped the
+ * rest of the batch. Mf Ghost against a Mangabat CDN that was down held the whole
+ * downloader for ninety minutes: 24 attempts, zero chapters, no other series considered.
+ * Series added hours earlier sat on nothing while the rotation looked correct, because the
+ * batch it handed over was 100% one dead series before any strike could apply.
+ */
+test("a series parked after repeated failures stops monopolising the queue", { skip: !haveDb }, async () => {
+  const p = db();
+  const dead = ids.get("Alpha Saga")!;
+  const other = ids.get("Zebra Chronicle")!;
+  await p.query("UPDATE series SET served = 0 WHERE id = ANY($1)", [[...ids.values()]]);
+  await p.query("UPDATE wanted SET state='pending', attempts=0, retry_after=NULL, started_at=NULL");
+
+  // Before the park, the dead series is first and takes the whole batch.
+  const before = await nextWanted(6, 25);
+  assert.ok(before.every((r) => r.series_id === dead),
+    "the failing series wins the rotation and fills the batch on its own");
+
+  // What the strike now does: every outstanding row of that series leaves the queue.
+  await p.query(
+    `UPDATE wanted SET retry_after = now() + interval '60 minutes'
+      WHERE series_id = $1 AND state IN ('pending','failed')`, [dead]);
+
+  const after = await nextWanted(6, 25);
+  assert.ok(after.length > 0, "the tick still has work to do");
+  assert.ok(after.every((r) => r.series_id !== dead),
+    "the parked series is gone from selection, so the batch reaches someone else");
+  assert.ok(after.some((r) => r.series_id === other),
+    "and that someone else is a series that was starving behind it");
+
+  // The park is a delay, not a deletion: the chapters are still owed.
+  const owed = await p.query<{ n: string }>(
+    "SELECT count(*) n FROM wanted WHERE series_id=$1 AND state='pending'", [dead]);
+  assert.ok(Number(owed.rows[0]!.n) > 0, "nothing was dropped, only deferred");
+
+  await p.query("UPDATE wanted SET retry_after=NULL");
+});

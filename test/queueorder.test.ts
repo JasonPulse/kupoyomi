@@ -504,3 +504,33 @@ test("a chapter that gave up gets another try once it is old enough", { skip: !h
   assert.equal(await has(), false, "not yet, on a normal tick");
   assert.equal(await has(6), true, "but an idle tick has nothing better to do");
 });
+
+/**
+ * A chapter the ledger says we hold is not something we want.
+ *
+ * Two downloaders racing one chapter left the file on disk, a chapter row written, and the
+ * wanted row saying failed, because the winner marked it done and the loser's failure
+ * write landed afterwards and clobbered it. Nothing swept for that, so the queue kept
+ * asking for a file already sitting on disk.
+ */
+test("a queued chapter we already hold is dropped from the queue", { skip: !haveDb }, async () => {
+  const { fetchWanted } = await import("../src/fetch.js");
+  const p = db();
+  const id = ids.get("Zebra Chronicle")!;
+  await p.query(
+    `INSERT INTO chapter (series_id, chapter_number, file_path, page_count)
+     VALUES ($1, 7, '/tmp/held.cbz', 10)
+     ON CONFLICT (series_id, chapter_number) DO NOTHING`, [id]);
+  await p.query(
+    "UPDATE wanted SET state='failed', attempts=2 WHERE series_id=$1 AND chapter_number=7", [id]);
+
+  // Muted so the run does no network work: the sweep happens before selection.
+  await p.query("UPDATE series SET muted = true WHERE id = ANY($1)", [[...ids.values()]]);
+  await fetchWanted({ limit: 1 });
+  await p.query("UPDATE series SET muted = false WHERE id = ANY($1)", [[...ids.values()]]);
+
+  const left = await p.query<{ n: string }>(
+    "SELECT count(*) n FROM wanted WHERE series_id=$1 AND chapter_number=7", [id]);
+  assert.equal(Number(left.rows[0]!.n), 0, "the queue no longer asks for a chapter we hold");
+  await p.query("DELETE FROM chapter WHERE series_id=$1 AND chapter_number=7", [id]);
+});

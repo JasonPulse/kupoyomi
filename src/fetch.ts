@@ -294,6 +294,21 @@ export async function fetchWanted(
   // Not for a single named chapter: reclaiming is for rows a dead process left behind, and
   // this row was just handed over deliberately.
   if (!opts.only) await reclaimStuck(Number(process.env["FETCH_STUCK_MINUTES"] ?? 30));
+  if (!opts.only) {
+    // A chapter the ledger says we hold is not something we want. Adoption already
+    // cleared these for the series it touched, but nothing swept generally, so a row left
+    // out of step stayed in the queue and downloaded over the top of a file we had. Two
+    // downloaders racing one chapter left exactly that: the winner marked it done, the
+    // loser's failure write landed after and clobbered it, so the file sat on disk with
+    // the queue still asking for it.
+    const stale = await p.query(
+      `DELETE FROM wanted w USING chapter c
+        WHERE c.series_id = w.series_id AND c.chapter_number = w.chapter_number
+          AND w.state <> 'done'`);
+    if ((stale.rowCount ?? 0) > 0) {
+      console.log(`${stale.rowCount} queued chapters are already held, so dropped from the queue`);
+    }
+  }
   let rows = opts.only ? await nextWanted(undefined, undefined, opts.only) : await nextWanted(opts.limit);
   // An empty queue is the right moment to look again at what gave up. The library will
   // not always be downloading, and a chapter waiting two days for another try can have

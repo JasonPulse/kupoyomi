@@ -37,7 +37,7 @@ export async function remap(seriesId: number, opts: { dryRun?: boolean } = {}): 
   if (!series) throw new Error(`no series ${seriesId}`);
 
   const binding = (await p.query<{ id: number; source_id: string; source_name: string; source_manga_id: number; source_url: string | null }>(
-    "SELECT id, source_id, source_name, source_manga_id, source_url FROM series_binding WHERE series_id = $1 AND role = 'primary'",
+    "SELECT id, source_id, source_name, source_manga_id, source_url FROM series_binding WHERE series_id = $1 AND role = 'active'",
     [seriesId])).rows[0];
   if (!binding) throw new Error(`series ${seriesId} has no primary binding`);
 

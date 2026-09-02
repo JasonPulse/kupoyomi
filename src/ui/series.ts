@@ -54,14 +54,14 @@ export async function seriesPage(id: number, said?: string): Promise<string> {
   // Availability is fetched per binding from the page, since each answer is a live
   // request to a site and four sources should not make the page wait for four.
   const bindRows = bindings.map((b) => `<tr data-binding="${b.id}">
-    <td>${esc(b.source_name)} ${b.role === "primary" ? '<span class="badge">primary</span>' : '<span class="dim">supplemental</span>'}</td>
+    <td>${esc(b.source_name)} ${b.role === "active" ? '<span class="badge">in use</span>' : '<span class="dim">previously used</span>'}</td>
     <td class="av dim">checking</td>
     <td class="rng dim">-</td>
     <td class="nb dim">-</td>
     <td class="nc dim">-</td>
-    <td>${b.role === "primary" ? "" : `<form method="post" action="/series/${id}/promote" style="display:inline">
+    <td>${b.role === "active" ? "" : `<form method="post" action="/series/${id}/switch" style="display:inline">
       <input type="hidden" name="binding" value="${b.id}">
-      <button class="weak" type="submit">make primary</button></form>`}</td></tr>`).join("");
+      <button class="weak" type="submit">use this one</button></form>`}</td></tr>`).join("");
 
   const wantRows = wanted.length === 0
     ? '<tr><td colspan="3" class="dim">nothing queued</td></tr>'
@@ -127,11 +127,11 @@ export async function seriesPage(id: number, said?: string): Promise<string> {
          <a href="/search?q=${encodeURIComponent(s.title)}&series=${id}" style="text-decoration:none">
            <button type="button" class="${bindings.length === 0 ? "" : "weak"}">${
              bindings.length === 0 ? "choose a source" : "migrate to another source"}</button></a>
-         <span class="hint">Searches every source for this title. Adding one attaches it to this series
-           rather than making a second one, and it arrives as supplemental so you can judge its real
-           chapter count and range in the table above before switching. Making it primary re-scans, and
-           because the ledger is keyed on chapter number, nothing already on disk is downloaded
-           twice.</span></div>
+         <span class="hint">Searches every source for this title. Choosing one switches this series
+           to it: a series has one source, and the one it replaces stays in the table above only to
+           record how the chapters already on disk got here. Switching re-scans, and because the
+           ledger is keyed on chapter number, nothing already held is downloaded twice. Chapters
+           queued but not carried by the new source leave the queue.</span></div>
        <div class="actions">
          <form method="post" action="/series/${id}/scan"><button class="weak" type="submit">check for new chapters</button></form>
          <form method="post" action="/series/${id}/metadata"><button class="weak" type="submit">refresh cover &amp; synopsis</button></form>

@@ -94,7 +94,7 @@ export async function searchPage(query?: string): Promise<string> {
     form + (cards || '<div class="card dim">nothing found on any installed source</div>'));
 }
 
-/** Creates the series and its primary binding, then queues whatever the source has. */
+/** Creates the series and its source, then queues whatever that source has. */
 export async function addSeries(v: {
   title: string; sourceId: string; sourceName: string; url: string;
   /** The series this source belongs to. Given when the caller already knows, which is
@@ -140,14 +140,18 @@ export async function addSeries(v: {
         id = s.rows[0]!.id;
       }
     }
-    const existing = (await client.query<{ id: number }>(
-      "SELECT id FROM series_binding WHERE series_id = $1 AND role = 'primary'", [id])).rows[0];
+    // Attaching a source IS switching to it. It used to arrive underneath the incumbent
+    // as a helper, which reads as a switch and is not: Mf Ghost was given XCOMIC and kept
+    // downloading every chapter from a Mangabat whose CDN was dead, because the source
+    // that was actually serving the series never changed. A series has one source.
+    await client.query(
+      "UPDATE series_binding SET role = 'former' WHERE series_id = $1 AND role = 'active'", [id]);
     await client.query(
       `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, source_url, role)
-       VALUES ($1,$2,$3,0,$4,$5)
+       VALUES ($1,$2,$3,0,$4,'active')
        ON CONFLICT (series_id, source_id, source_manga_id)
-         DO UPDATE SET source_url = EXCLUDED.source_url`,
-      [id, v.sourceId, v.sourceName, v.url, existing ? "supplemental" : "primary"]);
+         DO UPDATE SET source_url = EXCLUDED.source_url, role = 'active'`,
+      [id, v.sourceId, v.sourceName, v.url]);
     await client.query("COMMIT");
     return id;
   } catch (err) {

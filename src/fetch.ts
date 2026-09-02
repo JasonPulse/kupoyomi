@@ -50,7 +50,7 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
   const bindings = (await p.query<Binding>(
     `SELECT b.id, b.series_id, b.source_id, b.source_name, b.source_url, s.title, s.folder
        FROM series_binding b JOIN series s ON s.id = b.series_id
-      WHERE b.role = 'primary' AND NOT s.muted ${opts.seriesId ? "AND s.id = $1" : ""}
+      WHERE b.role = 'active' AND NOT s.muted ${opts.seriesId ? "AND s.id = $1" : ""}
       ORDER BY s.title`, opts.seriesId ? [opts.seriesId] : [])).rows;
 
   let queued = 0, checked = 0;
@@ -126,9 +126,9 @@ export type WantedRow = {
  * went to Mangabat's dead CDN, a manual retry included, which reads exactly like the retry
  * being broken rather than the queue pointing at the wrong place.
  *
- * Only chapters this source actually offers. A gap queued against a supplemental for
- * something the primary does not carry has to stay where it is, or it would be moved to a
- * source that cannot serve it and fail for a new reason.
+ * Only chapters this source actually offers get moved. Anything outstanding that it does
+ * not carry leaves the queue instead, because a series has one source and there is no
+ * longer a second one to ask.
  *
  * Attempts start over. Five failures against the old source say nothing about this one,
  * and carrying them across would bill the new source for the old one's record in the
@@ -137,13 +137,23 @@ export type WantedRow = {
 export async function pointQueueAt(
   seriesId: number, bindingId: number, chapters: number[],
 ): Promise<number> {
-  if (chapters.length === 0) return 0;
-  const r = await db().query(
+  const r = chapters.length === 0 ? { rowCount: 0 } : await db().query(
     `UPDATE wanted SET binding_id = $2, state = 'pending', attempts = 0,
                        retry_after = NULL, last_error = NULL
       WHERE series_id = $1 AND state <> 'done' AND binding_id <> $2
         AND chapter_number = ANY($3::numeric[])`,
     [seriesId, bindingId, chapters]);
+
+  // Anything still aimed at a source we no longer use cannot be fetched, because nothing
+  // reads a former binding. Rather than leave rows that quietly never run, they go: the
+  // one source we have does not carry them. If a later source does, the scan queues them
+  // again. Only outstanding rows, so how the chapters we already hold got here survives.
+  const orphaned = await db().query(
+    "DELETE FROM wanted WHERE series_id = $1 AND state <> 'done' AND binding_id <> $2",
+    [seriesId, bindingId]);
+  if ((orphaned.rowCount ?? 0) > 0) {
+    console.log(`  dropped ${orphaned.rowCount} queued chapters the new source does not carry`);
+  }
   return r.rowCount ?? 0;
 }
 

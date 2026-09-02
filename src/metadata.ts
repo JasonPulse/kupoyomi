@@ -136,7 +136,7 @@ export async function refreshMetadata(
     "SELECT title, folder FROM series WHERE id = $1", [seriesId])).rows[0];
   if (!s) throw new Error(`no series ${seriesId}`);
   const b = (await p.query<{ source_id: string; source_url: string | null }>(
-    "SELECT source_id, source_url FROM series_binding WHERE series_id = $1 AND role = 'primary'",
+    "SELECT source_id, source_url FROM series_binding WHERE series_id = $1 AND role = 'active'",
     [seriesId])).rows[0];
 
   // No binding means an archived series, and it used to return here empty-handed. The

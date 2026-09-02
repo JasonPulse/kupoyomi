@@ -128,22 +128,22 @@ export async function confirmCandidate(id: number, mangaId: number): Promise<voi
       [title, canonical(title)]);
     const seriesId = s.rows[0]!.id;
 
-    // The series may already exist with a primary binding: four series live on disk
+    // The series may already exist with a source: four series live on disk
     // under both a dead source and a live one, so the seeder got there first. If the
     // pick is that same binding, this is a no-op. If it differs, the pick wins and
-    // the incumbent becomes supplemental rather than being discarded.
+    // the incumbent becomes history rather than being discarded.
     const existing = (await client.query<{ id: number; source_manga_id: number; source_name: string }>(
-      "SELECT id, source_manga_id, source_name FROM series_binding WHERE series_id = $1 AND role = 'primary'",
+      "SELECT id, source_manga_id, source_name FROM series_binding WHERE series_id = $1 AND role = 'active'",
       [seriesId])).rows[0];
     if (existing && existing.source_manga_id !== pick.mangaId) {
-      await client.query("UPDATE series_binding SET role = 'supplemental' WHERE id = $1", [existing.id]);
-      console.log(`  demoted ${existing.source_name} to supplemental`);
+      await client.query("UPDATE series_binding SET role = 'former' WHERE id = $1", [existing.id]);
+      console.log(`  ${existing.source_name} is no longer the source, kept for what it delivered`);
     }
     await client.query(
       `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, source_url, role)
-       VALUES ($1,$2,$3,$4,$5,'primary')
+       VALUES ($1,$2,$3,$4,$5,'active')
        ON CONFLICT (series_id, source_id, source_manga_id)
-         DO UPDATE SET role = 'primary', source_url = EXCLUDED.source_url`,
+         DO UPDATE SET role = 'active', source_url = EXCLUDED.source_url`,
       [seriesId, pick.sourceId, pick.sourceName, pick.mangaId, pick.url ?? null]);
     await client.query("UPDATE import_candidate SET confirmed_series_id = $1 WHERE id = $2", [seriesId, id]);
     await client.query("COMMIT");

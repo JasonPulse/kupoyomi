@@ -3,8 +3,8 @@ import { esc, page } from "./layout.js";
 
 /**
  * Shows which sources carry the specific chapters a series is missing, and lets one be
- * chosen. Filling a named hole is not a migration: the primary binding stays, so the run
- * does not change translation group wholesale.
+ * chosen. Taking chapters from a source means using that source, so choosing one here
+ * switches the series to it. There is no second source to fill from.
  */
 export async function gapsPage(seriesId: number): Promise<string> {
   const g = await findGaps(seriesId);
@@ -37,7 +37,7 @@ export async function gapsPage(seriesId: number): Promise<string> {
        <div class="dim" style="font-size:12px;margin-top:6px">missing:
          ${esc(g.missing.slice(0, 60).join(", "))}${g.missing.length > 60 ? " ..." : ""}</div>
        <div class="actions"><a class="series" href="/series/${seriesId}">back to the series</a>
-         <span class="hint">queuing here adds a supplemental source and leaves the primary binding alone</span></div>
+         <span class="hint">this switches the series to that source and queues the chapters it covers</span></div>
      </div>
      <div class="card"><h2>Sources carrying the missing chapters</h2>
        <table><tr><th>source</th><th>covers</th><th>chapters it has</th><th></th></tr>

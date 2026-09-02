@@ -152,7 +152,7 @@ test("stopping a series clears its outstanding queue but keeps its history", { s
   const p = db();
   const b = await p.query<{ id: number }>(
     `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
-     VALUES ($1,'S','S',0,'primary') RETURNING id`, [seriesId]);
+     VALUES ($1,'S','S',0,'active') RETURNING id`, [seriesId]);
   const bindingId = b.rows[0]!.id;
   await p.query(
     `INSERT INTO wanted (series_id, chapter_number, binding_id, state) VALUES
@@ -284,7 +284,7 @@ test("a source added to a series in the library attaches instead of duplicating"
   const id = s.rows[0]!.id;
   await p.query(
     `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
-     VALUES ($1,'a','First Source',0,'primary')`, [id]);
+     VALUES ($1,'a','First Source',0,'active')`, [id]);
 
   // The three shapes that each used to create their own series.
   for (const [i, variant] of ["ATTACH TEST SERIES", `${TITLE} (Comic)`, `${TITLE} [Official]`].entries()) {
@@ -301,7 +301,7 @@ test("a source added to a series in the library attaches instead of duplicating"
   const roles = (await p.query<{ role: string; source_name: string }>(
     "SELECT role, source_name FROM series_binding WHERE series_id = $1 ORDER BY source_name", [id])).rows;
   assert.equal(roles.length, 4, "one primary and three supplemental");
-  assert.equal(roles.filter((r) => r.role === "primary").length, 1,
+  assert.equal(roles.filter((r) => r.role === "active").length, 1,
     "the incumbent stays primary: attaching a source must not silently switch the binding");
 
   await p.query("DELETE FROM series WHERE id = $1", [id]);
@@ -702,7 +702,7 @@ test("quiet is not claimed for an unknown date or an unbound series", { skip: !h
     if (bind) {
       await p.query(
         `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
-         VALUES ($1,'s','S',0,'primary')`, [id]);
+         VALUES ($1,'s','S',0,'active')`, [id]);
     }
     return id;
   };

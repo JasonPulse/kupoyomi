@@ -10,7 +10,7 @@ export type GapReport = {
   seriesId: number; title: string;
   /** Missing whole chapters inside the held range. */
   missing: number[];
-  /** Already queued, so the primary source can supply them and nothing else is needed. */
+  /** Already queued, so the source in use can supply them and nothing else is needed. */
   queued: number[];
   /** Neither held nor queued: only another source can close these. */
   unsupplied: number[];
@@ -57,7 +57,7 @@ export type GapSource = {
 /**
  * Finds sources that carry the specific chapters missing from a series.
  *
- * This is not a migration: the series keeps its primary binding and only the named
+ * Choosing a source here switches the series to it, and only the named
  * chapters come from elsewhere. Splicing in a whole other source would mix translation
  * groups across the run, which is the thing to avoid -- filling a named hole is not.
  */
@@ -110,8 +110,12 @@ export async function findGapSources(seriesId: number, concurrency = 6): Promise
 }
 
 /**
- * Queues the named chapters against a supplemental binding, leaving the primary alone.
- * The download path already resolves per binding, so nothing else needs to change.
+ * Switches the series to this source and queues the named chapters from it.
+ *
+ * This used to add the source underneath the incumbent and queue against it, so a series
+ * could be downloading from two places at once. A series has one source: asking for
+ * chapters only this one carries is asking to use it, so it takes over and the one it
+ * replaces becomes history.
  */
 export async function queueGapFill(
   seriesId: number, source: { sourceId: string; sourceName: string; url: string }, numbers: number[],
@@ -120,11 +124,13 @@ export async function queueGapFill(
   const client = await p.connect();
   try {
     await client.query("BEGIN");
+    await client.query(
+      "UPDATE series_binding SET role = 'former' WHERE series_id = $1 AND role = 'active'", [seriesId]);
     const b = await client.query<{ id: number }>(
       `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, source_url, role)
-       VALUES ($1,$2,$3,0,$4,'supplemental')
+       VALUES ($1,$2,$3,0,$4,'active')
        ON CONFLICT (series_id, source_id, source_manga_id)
-         DO UPDATE SET source_url = EXCLUDED.source_url RETURNING id`,
+         DO UPDATE SET source_url = EXCLUDED.source_url, role = 'active' RETURNING id`,
       [seriesId, source.sourceId, source.sourceName, source.url]);
     const bindingId = b.rows[0]!.id;
     // Filling gaps on a stopped series would queue rows that fetch skips, which is how a

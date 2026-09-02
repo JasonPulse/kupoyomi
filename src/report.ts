@@ -24,7 +24,7 @@ export async function report(): Promise<void> {
   );
 
   console.log(`\ngap chapters the bound source already lists (re-queue) : ${inv.gaps.requeue}`);
-  console.log(`gap chapters needing a supplemental source            : ${inv.gaps.elsewhere}`);
+  console.log(`gap chapters only another source carries               : ${inv.gaps.elsewhere}`);
 
   if (inv.duplicated.length > 0) {
     console.log("\nduplicated series (candidates for consolidation):");

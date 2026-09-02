@@ -43,7 +43,7 @@ before(async () => {
     ids.set(title, id);
     const b = await p.query<{ id: number }>(
       `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
-       VALUES ($1,'src','Src',0,'primary') RETURNING id`, [id]);
+       VALUES ($1,'src','Src',0,'active') RETURNING id`, [id]);
     for (let n = 1; n <= count; n++) {
       await p.query("INSERT INTO wanted (series_id, chapter_number, binding_id) VALUES ($1,$2,$3)",
         [id, n, b.rows[0]!.id]);
@@ -543,12 +543,12 @@ test("a queued chapter we already hold is dropped from the queue", { skip: !have
  * Mf Ghost was moved off Mangabat and all 269 queued chapters still went to Mangabat's
  * dead CDN, a manual retry included, which reads exactly like the retry being broken.
  */
-test("promoting a new source moves the chapters already queued", { skip: !haveDb }, async () => {
+test("switching source moves the queue across and drops what it cannot carry", { skip: !haveDb }, async () => {
   const { pointQueueAt } = await import("../src/fetch.js");
   const p = db();
   const id = ids.get("Middle Tale")!;
   const oldBinding = (await p.query<{ id: number }>(
-    "SELECT id FROM series_binding WHERE series_id=$1 AND role='primary'", [id])).rows[0]!.id;
+    "SELECT id FROM series_binding WHERE series_id=$1 AND role='active'", [id])).rows[0]!.id;
 
   // Five failures against the source that is about to be replaced.
   await p.query(
@@ -558,10 +558,10 @@ test("promoting a new source moves the chapters already queued", { skip: !haveDb
 
   const newBinding = (await p.query<{ id: number }>(
     `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
-     VALUES ($1,'src2','Src Two',0,'supplemental') RETURNING id`, [id])).rows[0]!.id;
+     VALUES ($1,'src2','Src Two',0,'former') RETURNING id`, [id])).rows[0]!.id;
 
-  // The new source carries 1 to 3 but not 4, which is queued against the old binding as a
-  // gap would be. Chapter 4 must be left alone.
+  // The new source carries 1 to 3 but not 4. Chapter 4 has nowhere to come from now, so
+  // it leaves the queue rather than sitting there aimed at a source nothing reads.
   const moved = await pointQueueAt(id, newBinding, [1, 2, 3]);
   assert.equal(moved, 3, "the three chapters it carries follow the series across");
 
@@ -573,10 +573,60 @@ test("promoting a new source moves the chapters already queued", { skip: !haveDb
     assert.equal(r.attempts, 0, "and starting over, since the old source's failures say nothing about this one");
     assert.equal(r.last_error, null, "with the old source's error cleared");
   }
-  const four = rows.rows.find((x) => Number(x.chapter_number) === 4);
-  assert.equal(Number(four?.binding_id), Number(oldBinding),
-    "a chapter the new source does not carry stays where it was, or it would fail for a new reason");
+  assert.equal(rows.rows.some((x) => Number(x.chapter_number) === 4), false,
+    "a chapter the new source does not carry leaves the queue: there is no second source to ask");
+  const stillOnOld = await p.query<{ n: string }>(
+    "SELECT count(*) n FROM wanted WHERE series_id=$1 AND state <> 'done' AND binding_id=$2",
+    [id, oldBinding]);
+  assert.equal(Number(stillOnOld.rows[0]!.n), 0,
+    "nothing outstanding is left pointing at a source no longer in use");
 
   await p.query("UPDATE wanted SET binding_id=$2 WHERE series_id=$1", [id, oldBinding]);
   await p.query("DELETE FROM series_binding WHERE id=$1", [newBinding]);
+});
+
+/**
+ * A series has one source.
+ *
+ * "primary" and "supplemental" described sources usable at once with a hierarchy between
+ * them, and the words cost real time: attaching a source from the migrate page created a
+ * supplemental, which reads as switching and is not. Mf Ghost was given XCOMIC and went on
+ * downloading every chapter from a Mangabat whose CDN was dead, because the source actually
+ * serving the series never changed.
+ *
+ * What must survive a switch is how the chapters already on disk got here, which is what
+ * the retired binding is kept for.
+ */
+test("only one source is ever in use, and the retired one keeps its history", { skip: !haveDb }, async () => {
+  const p = db();
+  const id = ids.get("Zebra Chronicle")!;
+  const first = (await p.query<{ id: number }>(
+    "SELECT id FROM series_binding WHERE series_id=$1 AND role='active'", [id])).rows[0]!.id;
+
+  // A chapter delivered by the source about to be replaced.
+  await p.query(
+    `INSERT INTO chapter (series_id, chapter_number, file_path, page_count, binding_id)
+     VALUES ($1, 9, '/tmp/nine.cbz', 12, $2)
+     ON CONFLICT (series_id, chapter_number) DO UPDATE SET binding_id = EXCLUDED.binding_id`,
+    [id, first]);
+
+  const second = (await p.query<{ id: number }>(
+    `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
+     VALUES ($1,'src3','Src Three',0,'former') RETURNING id`, [id])).rows[0]!.id;
+  await p.query("UPDATE series_binding SET role='former' WHERE series_id=$1 AND role='active'", [id]);
+  await p.query("UPDATE series_binding SET role='active' WHERE id=$1", [second]);
+
+  const roles = await p.query<{ role: string }>(
+    "SELECT role FROM series_binding WHERE series_id=$1", [id]);
+  assert.equal(roles.rows.filter((r) => r.role === "active").length, 1,
+    "exactly one source is in use, which the unique index also enforces");
+
+  const held = await p.query<{ binding_id: number }>(
+    "SELECT binding_id FROM chapter WHERE series_id=$1 AND chapter_number=9", [id]);
+  assert.equal(Number(held.rows[0]!.binding_id), Number(first),
+    "the chapter still records the source that delivered it, after that source was retired");
+
+  await p.query("DELETE FROM chapter WHERE series_id=$1 AND chapter_number=9", [id]);
+  await p.query("DELETE FROM series_binding WHERE id=$1", [second]);
+  await p.query("UPDATE series_binding SET role='active' WHERE id=$1", [first]);
 });

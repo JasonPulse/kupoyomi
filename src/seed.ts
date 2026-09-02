@@ -101,8 +101,8 @@ export async function seedLedger(): Promise<void> {
         const seriesId = s.rows[0]!.id;
         const b = await client.query<{ id: number }>(
           `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
-           VALUES ($1,$2,$3,$4,'primary')
-           ON CONFLICT (series_id, source_id, source_manga_id) DO UPDATE SET role = 'primary' RETURNING id`,
+           VALUES ($1,$2,$3,$4,'active')
+           ON CONFLICT (series_id, source_id, source_manga_id) DO UPDATE SET role = 'active' RETURNING id`,
           [seriesId, sourceIds.get(d.sourceDir) ?? d.sourceDir, d.sourceDir, row.suwayomi_id]);
         const bindingId = b.rows[0]!.id;
 

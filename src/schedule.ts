@@ -68,7 +68,7 @@ export async function checkStalled(): Promise<number> {
       WHERE stalled_since IS NOT NULL AND (
         muted OR status = 'COMPLETED'
         OR NOT EXISTS (SELECT 1 FROM series_binding b
-                        WHERE b.series_id = series.id AND b.role = 'primary')
+                        WHERE b.series_id = series.id AND b.role = 'active')
         OR COALESCE((SELECT max(c.uploaded_at) FROM chapter c WHERE c.series_id = series.id),
                     now()) < '1995-01-01')`);
   if ((cleared.rowCount ?? 0) > 0) {
@@ -89,7 +89,7 @@ export async function checkStalled(): Promise<number> {
         -- Nothing is looking for chapters when nothing is bound, so silence is not
         -- evidence of anything. An imported folder is not a series that went quiet.
         AND EXISTS (SELECT 1 FROM series_binding b
-                     WHERE b.series_id = s.id AND b.role = 'primary')
+                     WHERE b.series_id = s.id AND b.role = 'active')
       GROUP BY s.id, s.title, s.stall_alerted_at`)).rows;
 
   let flagged = 0;

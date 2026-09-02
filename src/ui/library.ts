@@ -33,14 +33,14 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
   const rows = (await p.query<Row>(
     `SELECT s.id, s.title, s.status, s.muted, s.cover_path,
             NOT EXISTS (SELECT 1 FROM series_binding b
-                         WHERE b.series_id = s.id AND b.role = 'primary') AS unbound,
+                         WHERE b.series_id = s.id AND b.role = 'active') AS unbound,
             count(c.chapter_number)::int AS held,
             min(c.chapter_number) AS lo, max(c.chapter_number) AS hi,
             max(c.uploaded_at)::date::text AS last_upload,
             s.stalled_since::text AS stalled_since,
             COALESCE(extract(epoch from s.metadata_at)::bigint, 0)::text AS ver,
             (SELECT b.source_name FROM series_binding b
-              WHERE b.series_id = s.id AND b.role = 'primary') AS source,
+              WHERE b.series_id = s.id AND b.role = 'active') AS source,
             (SELECT count(*)::int FROM wanted w
               WHERE w.series_id = s.id AND w.state <> 'done') AS wanted,
             (SELECT count(*)::int FROM wanted w

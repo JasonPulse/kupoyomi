@@ -74,7 +74,7 @@ before(async () => {
     await p.query(
       `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
        VALUES ($1,$2,$3,0,$4)`,
-      [id, name, name, name === "RealSource (EN)" ? "primary" : "supplemental"]);
+      [id, name, name, name === "RealSource (EN)" ? "active" : "former"]);
   }
 });
 

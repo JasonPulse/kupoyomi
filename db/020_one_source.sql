@@ -10,11 +10,14 @@
 -- chapter.binding_id points at them and how a file we hold got here is worth keeping,
 -- but they are history and nothing reads them to download or to check for updates.
 
-UPDATE series_binding SET role = 'active'  WHERE role = 'primary';
-UPDATE series_binding SET role = 'former'  WHERE role = 'supplemental';
-
+-- The old check has to go before the rows can be renamed: it forbids the new words, so
+-- rewriting the rows first fails on its own constraint.
 ALTER TABLE series_binding DROP CONSTRAINT series_binding_role_check;
-ALTER TABLE series_binding ADD  CONSTRAINT series_binding_role_check
+
+UPDATE series_binding SET role = 'active' WHERE role = 'primary';
+UPDATE series_binding SET role = 'former' WHERE role = 'supplemental';
+
+ALTER TABLE series_binding ADD CONSTRAINT series_binding_role_check
       CHECK (role IN ('active', 'former'));
 
 DROP INDEX series_one_primary;

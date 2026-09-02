@@ -534,3 +534,49 @@ test("a queued chapter we already hold is dropped from the queue", { skip: !have
   assert.equal(Number(left.rows[0]!.n), 0, "the queue no longer asks for a chapter we hold");
   await p.query("DELETE FROM chapter WHERE series_id=$1 AND chapter_number=7", [id]);
 });
+
+/**
+ * Switching a series to a new source has to move the chapters already queued.
+ *
+ * A wanted row kept the binding it was first queued against, so a promotion changed where
+ * future chapters came from and left every outstanding row fetching from the old source.
+ * Mf Ghost was moved off Mangabat and all 269 queued chapters still went to Mangabat's
+ * dead CDN, a manual retry included, which reads exactly like the retry being broken.
+ */
+test("promoting a new source moves the chapters already queued", { skip: !haveDb }, async () => {
+  const { pointQueueAt } = await import("../src/fetch.js");
+  const p = db();
+  const id = ids.get("Middle Tale")!;
+  const oldBinding = (await p.query<{ id: number }>(
+    "SELECT id FROM series_binding WHERE series_id=$1 AND role='primary'", [id])).rows[0]!.id;
+
+  // Five failures against the source that is about to be replaced.
+  await p.query(
+    `UPDATE wanted SET state='failed', attempts=5, last_error='page 0: dead CDN',
+                       retry_after = now() + interval '1 day'
+      WHERE series_id=$1 AND chapter_number <= 3`, [id]);
+
+  const newBinding = (await p.query<{ id: number }>(
+    `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, role)
+     VALUES ($1,'src2','Src Two',0,'supplemental') RETURNING id`, [id])).rows[0]!.id;
+
+  // The new source carries 1 to 3 but not 4, which is queued against the old binding as a
+  // gap would be. Chapter 4 must be left alone.
+  const moved = await pointQueueAt(id, newBinding, [1, 2, 3]);
+  assert.equal(moved, 3, "the three chapters it carries follow the series across");
+
+  const rows = await p.query<{ chapter_number: string; binding_id: number; attempts: number; last_error: string | null }>(
+    `SELECT chapter_number, binding_id, attempts, last_error FROM wanted
+      WHERE series_id=$1 AND chapter_number <= 4 ORDER BY chapter_number`, [id]);
+  for (const r of rows.rows.filter((x) => Number(x.chapter_number) <= 3)) {
+    assert.equal(Number(r.binding_id), Number(newBinding), "moved to the new source");
+    assert.equal(r.attempts, 0, "and starting over, since the old source's failures say nothing about this one");
+    assert.equal(r.last_error, null, "with the old source's error cleared");
+  }
+  const four = rows.rows.find((x) => Number(x.chapter_number) === 4);
+  assert.equal(Number(four?.binding_id), Number(oldBinding),
+    "a chapter the new source does not carry stays where it was, or it would fail for a new reason");
+
+  await p.query("UPDATE wanted SET binding_id=$2 WHERE series_id=$1", [id, oldBinding]);
+  await p.query("DELETE FROM series_binding WHERE id=$1", [newBinding]);
+});

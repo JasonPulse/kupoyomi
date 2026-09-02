@@ -94,6 +94,9 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
     // exactly that and kept failing against a source that 500s.
     const heldAsParts = new Set(heldNums.filter((n) => !Number.isInteger(n)).map(Math.trunc));
 
+    const moved = await pointQueueAt(b.series_id, b.id, offered2);
+    if (moved > 0) console.log(`  ${b.title.slice(0, 40)}: moved ${moved} queued chapters to ${b.source_name}`);
+
     for (const n of offered2) {
       if (held.has(n)) continue;
       if (wholeOnly && Number.isInteger(n) && heldAsParts.has(n)) continue;
@@ -114,6 +117,36 @@ export type WantedRow = {
 };
 
 /** The queue's serving order. Separated from the download loop so it can be proven. */
+/**
+ * Points chapters already queued at the binding now serving the series.
+ *
+ * A wanted row kept the binding it was first queued against, so moving a series to a new
+ * source changed where future chapters came from and left every outstanding row fetching
+ * from the old one. Mf Ghost was switched off Mangabat and all 269 queued chapters still
+ * went to Mangabat's dead CDN, a manual retry included, which reads exactly like the retry
+ * being broken rather than the queue pointing at the wrong place.
+ *
+ * Only chapters this source actually offers. A gap queued against a supplemental for
+ * something the primary does not carry has to stay where it is, or it would be moved to a
+ * source that cannot serve it and fail for a new reason.
+ *
+ * Attempts start over. Five failures against the old source say nothing about this one,
+ * and carrying them across would bill the new source for the old one's record in the
+ * health metric.
+ */
+export async function pointQueueAt(
+  seriesId: number, bindingId: number, chapters: number[],
+): Promise<number> {
+  if (chapters.length === 0) return 0;
+  const r = await db().query(
+    `UPDATE wanted SET binding_id = $2, state = 'pending', attempts = 0,
+                       retry_after = NULL, last_error = NULL
+      WHERE series_id = $1 AND state <> 'done' AND binding_id <> $2
+        AND chapter_number = ANY($3::numeric[])`,
+    [seriesId, bindingId, chapters]);
+  return r.rowCount ?? 0;
+}
+
 export async function nextWanted(
   limit?: number, blockSize?: number,
   /** One named chapter, bypassing the rotation entirely. A manual retry is a request to

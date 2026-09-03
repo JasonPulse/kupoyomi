@@ -255,7 +255,8 @@ export async function nextWanted(
      -- arriving at the same row waits, re-checks this WHERE once the first commits, sees
      -- the fresh fetching mark and declines to take it.
      claimed AS (
-       UPDATE wanted w SET state = 'fetching', started_at = now()
+       UPDATE wanted w SET state = 'fetching', started_at = now(),
+                          pages_done = 0, pages_total = NULL
          FROM picked p, series_binding b, series s
         WHERE w.series_id = p.series_id AND w.chapter_number = p.chapter_number
           AND b.id = w.binding_id AND s.id = w.series_id
@@ -381,11 +382,19 @@ export async function fetchWanted(
   const giveUpAfter = opts.only ? Number.MAX_SAFE_INTEGER : Number(process.env["FETCH_SERIES_STRIKES"] ?? 3);
   const strikes = new Map<number, number>();
   let skipped = 0;
+  // Selection marks every row it hands over as 'fetching', so a row this run does not get
+  // to has to be given back. Without that the strike counter's leftovers sat claimed until
+  // reclaimStuck noticed them half an hour later, and the downloads page showed four
+  // phantom downloads with an elapsed time climbing past 800 seconds and page counts left
+  // over from an earlier attempt. Nothing was downloading them.
+  const key = (r: { series_id: number; chapter_number: string }) => `${r.series_id}:${r.chapter_number}`;
+  const unhandled = new Set(rows.map(key));
 
   const runSource = async (items: typeof rows): Promise<void> => {
     const resolved = new Map<number, number>();     // binding id -> local manga id
     for (const it of items) {
       if ((strikes.get(it.series_id) ?? 0) >= giveUpAfter) { skipped++; continue; }
+      unhandled.delete(key(it));
       try {
         let mangaId = resolved.get(it.binding_id);
         if (mangaId === undefined) {
@@ -529,6 +538,19 @@ export async function fetchWanted(
 
   for (let i = 0; i < queues.length; i += concurrency) {
     await Promise.all(queues.slice(i, i + concurrency).map(runSource));
+  }
+  // Handed back, so the queue reflects what is actually happening: nothing.
+  if (unhandled.size > 0) {
+    const pairs = [...unhandled].map((k) => k.split(":"));
+    const released = await p.query(
+      `UPDATE wanted SET state = 'pending', started_at = NULL, pages_done = 0, pages_total = NULL
+        WHERE state = 'fetching'
+          AND (series_id, chapter_number) IN (${
+            pairs.map((_, i) => `($${i * 2 + 1}::bigint, $${i * 2 + 2}::numeric)`).join(",")})`,
+      pairs.flat());
+    if ((released.rowCount ?? 0) > 0) {
+      console.log(`released ${released.rowCount} claimed chapters this run never reached`);
+    }
   }
   // A series with nothing left owes no turns. Clearing it means new chapters arriving
   // tomorrow start at the front rather than behind however much it downloaded today.

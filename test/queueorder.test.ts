@@ -630,3 +630,39 @@ test("only one source is ever in use, and the retired one keeps its history", { 
   await p.query("DELETE FROM series_binding WHERE id=$1", [second]);
   await p.query("UPDATE series_binding SET role='active' WHERE id=$1", [first]);
 });
+
+/**
+ * A claimed chapter nobody is downloading must not look like one that is.
+ *
+ * Selection marks every row it hands over as 'fetching' so two loops cannot take the same
+ * one. Rows the run then never reaches, the ones the strike counter skips, were left
+ * claimed until reclaimStuck noticed them thirty minutes later. The downloads page showed
+ * four phantom downloads with elapsed time past 800 seconds and page counts inherited from
+ * an earlier attempt, while nothing was downloading anything.
+ */
+test("a claimed chapter the run never reached is handed back", { skip: !haveDb }, async () => {
+  const { fetchWanted } = await import("../src/fetch.js");
+  const p = db();
+  const id = ids.get("Zebra Chronicle")!;
+
+  // Stale progress from a previous attempt is what made the phantoms convincing.
+  await p.query(
+    "UPDATE wanted SET pages_done = 6, pages_total = 104 WHERE series_id=$1 AND chapter_number <= 4", [id]);
+  // Muted, so selection claims nothing and the run has no network work: what is under test
+  // is that a claim is never left behind, and no row should be 'fetching' afterwards.
+  await p.query("UPDATE series SET muted = true WHERE id = ANY($1)", [[...ids.values()]]);
+  await fetchWanted({ limit: 4 });
+  await p.query("UPDATE series SET muted = false WHERE id = ANY($1)", [[...ids.values()]]);
+
+  const claimed = await p.query<{ n: string }>("SELECT count(*) n FROM wanted WHERE state='fetching'");
+  assert.equal(Number(claimed.rows[0]!.n), 0, "no row is left claiming to be downloading");
+
+  // And a fresh claim starts from no progress, so a phantom cannot borrow last time's.
+  const rows = await nextWanted(2, 25);
+  assert.ok(rows.length > 0, "selection handed something over");
+  const fresh = await p.query<{ pages_done: number; pages_total: number | null }>(
+    `SELECT pages_done, pages_total FROM wanted
+      WHERE series_id=$1 AND chapter_number=$2`, [rows[0]!.series_id, rows[0]!.chapter_number]);
+  assert.equal(fresh.rows[0]!.pages_done, 0, "progress starts at zero on a new claim");
+  assert.equal(fresh.rows[0]!.pages_total, null, "and the old page total is gone");
+});

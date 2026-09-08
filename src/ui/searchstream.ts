@@ -1,6 +1,7 @@
 import type { ServerResponse } from "node:http";
 import { gql } from "../suwayomi.js";
 import { usableSources } from "../paid.js";
+import { preferWholeChapters, wholesCovered } from "../chapters.js";
 
 const SEARCH = `mutation($src:LongString!,$q:String!){
   fetchSourceManga(input:{source:$src,type:SEARCH,query:$q,page:1}){
@@ -81,7 +82,11 @@ async function against(seriesId: number, offeredAll: number[]): Promise<{
   // column promised eleven chapters and the queue asked for two.
   const takesSplits = (await db().query<{ t: boolean }>(
     "SELECT take_splits AS t FROM series WHERE id = $1", [seriesId])).rows[0]?.t ?? false;
-  const offered = takesSplits ? offeredAll : offeredAll.filter((n) => Number.isInteger(n));
+  // What the downloader would take, not merely the whole numbers. Filtering every
+  // decimal here made a source offering 7.1 7.2 7.3 and no whole 7 read as covering
+  // nothing, so the migrate page argued against the source that was the only one with
+  // the chapter.
+  const offered = takesSplits ? offeredAll : preferWholeChapters(offeredAll, held);
   const heldMax = held.size > 0 ? Math.max(...held) : null;
   const offeredSet = new Set(offered);
   return {

@@ -14,7 +14,7 @@ import { scanWanted, fetchWanted } from "./fetch.js";
 import { checkStalled } from "./schedule.js";
 import { refreshAllMetadata } from "./metadata.js";
 import { planRemoval, removeSeries } from "./remove.js";
-import { findGaps, findGapSources } from "./gaps.js";
+import { findGaps } from "./gaps.js";
 import { parseCheck } from "./parsecheck.js";
 import { serve } from "./server.js";
 
@@ -152,9 +152,7 @@ const main = async (): Promise<void> => {
       console.log(`${g.title}: ${g.missing.length} missing, ${g.queued.length} already queued, ${g.unsupplied.length} need another source`);
       if (g.unsupplied.length > 0) {
         console.log(`  ${g.unsupplied.slice(0, 40).join(", ")}`);
-        for (const s2 of await findGapSources(sid)) {
-          console.log(`  ${s2.sourceName.padEnd(22)} covers ${String(s2.covers.length).padStart(3)} of ${g.unsupplied.length}: ${s2.covers.slice(0, 14).join(", ")}`);
-        }
+        console.log("  the source in use does not carry these. Migrate the series to one that does.");
       }
       await closeDb();
       break;

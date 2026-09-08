@@ -1,5 +1,6 @@
 import { scanLegacyTree, type DiskSeries } from "./disk.js";
 import { installedSources, libraryWithChapters, allManga, type Chapter } from "./suwayomi.js";
+import { wholesCovered } from "./chapters.js";
 
 /** Loose key used only to group folders that are obviously the same series. */
 export const normalize = (s: string): string =>
@@ -8,15 +9,10 @@ export const normalize = (s: string): string =>
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 
-const wholeNumbers = (chapters: Chapter[], downloadedOnly: boolean): Set<number> => {
-  const out = new Set<number>();
-  for (const c of chapters) {
-    if (downloadedOnly && !c.isDownloaded) continue;
-    if (c.chapterNumber === null) continue;
-    if (Number.isInteger(c.chapterNumber)) out.add(c.chapterNumber);
-  }
-  return out;
-};
+const wholeNumbers = (chapters: Chapter[], downloadedOnly: boolean): Set<number> =>
+  wholesCovered(chapters
+    .filter((c) => (!downloadedOnly || c.isDownloaded) && c.chapterNumber !== null)
+    .map((c) => c.chapterNumber as number));
 
 export type SourceRollup = { sourceDir: string; series: number; files: number; live: boolean };
 export type GapReport = { title: string; requeue: number[]; elsewhere: number[] };

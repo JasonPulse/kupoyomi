@@ -5,6 +5,7 @@ import { db } from "./db.js";
 import { scanLegacyTree } from "./disk.js";
 import { parseChapterNumber } from "./chapternum.js";
 import { chapterFilename } from "./remap.js";
+import { supersededByWhole, IS_PART_SQL } from "./chapters.js";
 
 /**
  * Adopts chapters already on disk into a series, from every folder that holds them.
@@ -122,7 +123,7 @@ export async function findOnDisk(seriesId: number, opts: { propose?: boolean } =
       // Offering it back put an adopt button on four folders that had nothing left to
       // give, and pressing it would have undone the prune. A series that takes splits
       // wants them, so it is exempt.
-      if (!takesSplits && !Number.isInteger(n) && held.has(Math.trunc(n))) { alreadyHeld++; continue; }
+      if (!takesSplits && supersededByWhole(n, held)) { alreadyHeld++; continue; }
       let size = 0;
       try { size = statSync(`${dir}/${f}`).size; } catch { continue; }
       const prev = best.get(n);
@@ -316,7 +317,7 @@ export async function redundantFolders(): Promise<Array<{
       // is accounted for rather than missing. Without this, 33 of the 37 folders kept back
       // were kept by our own decision and could never be pruned. A series that takes
       // splits is exempt: for it, a decimal is wanted and its absence is a real gap.
-      const discarded = !l.take_splits && !Number.isInteger(n) && held.has(Math.trunc(n));
+      const discarded = !l.take_splits && supersededByWhole(n, held);
       if (!held.has(n) && !discarded) { missing++; continue; }
       if (discarded) continue;   // no file of ours to compare against, so nothing to count
       try {
@@ -503,7 +504,7 @@ export async function pruneSplitChapters(opts: { delete?: boolean } = {}): Promi
     gone++;
   }
   const q = opts.delete
-    ? await p.query("DELETE FROM wanted WHERE state <> 'done' AND chapter_number <> trunc(chapter_number)")
+    ? await p.query(`DELETE FROM wanted WHERE state <> 'done' AND ${IS_PART_SQL}`)
     : { rowCount: 0 };
   console.log(`\n${opts.delete ? `deleted ${gone}` : `would delete ${redundant.length}`} redundant chapters, `
     + `${(freed / 1048576).toFixed(0)}MB reclaimable`

@@ -6,6 +6,8 @@ import { gql } from "./suwayomi.js";
 import { resolveManga } from "./match.js";
 import { buildCbz, comicInfo } from "./cbz.js";
 import { chapterFilename } from "./remap.js";
+import { preferWholeChapters, wholesHeldAsParts, isPart, basesOf, supersededByParts,
+  IS_PART_SQL, BASE_OF_SQL } from "./chapters.js";
 
 /** Suwayomi's page proxy lives beside the graphql endpoint. */
 const httpBase = (): string => config.suwayomiUrl.replace(/\/api\/graphql\/?$/, "");
@@ -73,15 +75,12 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
       "SELECT chapter_number FROM chapter WHERE series_id = $1", [b.series_id])).rows
       .map((r) => Number(r.chapter_number));
     const held = new Set(heldNums);
-    // Whole chapters we already hold as parts. Holding 8.1 and 8.2 is holding chapter 8,
-    // so fetching the whole 8 is fetching the same pages a third time. It was queued for
-    // exactly that and kept failing against a source that 500s.
-    const heldAsParts = new Set(heldNums.filter((n) => !Number.isInteger(n)).map(Math.trunc));
+    const heldAsParts = wholesHeldAsParts(heldNums);
 
     const wholeOnly = (process.env["FETCH_WHOLE_ONLY"] ?? "true") !== "false" && !b.take_splits;
     const offered2 = wholeOnly ? preferWholeChapters(offeredAll, held) : offeredAll;
     const skippedSplits = offeredAll.length - offered2.length;
-    const partsTaken = offered2.filter((n) => !Number.isInteger(n)).length;
+    const partsTaken = offered2.filter(isPart).length;
     if (dropped.length > 0) {
       console.log(`  ${b.title.slice(0, 40)}: ignoring ${dropped.join(", ")}, `
         + `${dropped.length === 1 ? "that number is" : "those numbers are"} hundreds above the rest of the run`);
@@ -91,7 +90,7 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
         skippedSplits === 1 ? "" : "s"} that arrive whole as well`);
     }
     if (wholeOnly && partsTaken > 0) {
-      const bases = [...new Set(offered2.filter((n) => !Number.isInteger(n)).map(Math.trunc))];
+      const bases = basesOf(offered2);
       console.log(`  ${b.title.slice(0, 40)}: taking ${partsTaken} parts for chapter${
         bases.length === 1 ? "" : "s"} ${bases.join(", ")}, which this source has no whole version of`);
     }
@@ -101,7 +100,7 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
 
     for (const n of offered2) {
       if (held.has(n)) continue;
-      if (wholeOnly && Number.isInteger(n) && heldAsParts.has(n)) continue;
+      if (wholeOnly && supersededByParts(n, heldAsParts)) continue;
       const r = await p.query(
         `INSERT INTO wanted (series_id, chapter_number, binding_id) VALUES ($1,$2,$3)
          ON CONFLICT (series_id, chapter_number) DO NOTHING`, [b.series_id, n, b.id]);
@@ -136,26 +135,6 @@ export type WantedRow = {
  * and carrying them across would bill the new source for the old one's record in the
  * health metric.
  */
-/**
- * Drops parts that duplicate a chapter available whole, and keeps the ones that do not.
- *
- * A decimal is usually one chapter split by a release group, so taking 25.1 and 25.2
- * alongside 25 means reading the same pages twice. Refusing every decimal outright is a
- * different thing, and it silently cost four chapters: MangaDex carries one series as
- * 7.1 7.2 7.3, 8.1 8.2 8.3, 9.1 9.2 9.3, 11.1 11.2 and offers no whole 7, 8, 9 or 11 at
- * all. Every part was dropped, the scan queued nothing, and the downloader correctly said
- * it had nothing to do while four chapters sat on a source that had them.
- *
- * So a part is refused only when there is a whole to prefer: the source offers that whole,
- * or we already hold it. Otherwise the parts are the chapter, and the parts are what we
- * take.
- */
-export function preferWholeChapters(offered: number[], held: Set<number>): number[] {
-  const wholes = new Set(offered.filter((n) => Number.isInteger(n)));
-  return offered.filter((n) => Number.isInteger(n)
-    || (!wholes.has(Math.trunc(n)) && !held.has(Math.trunc(n))));
-}
-
 export async function pointQueueAt(
   seriesId: number, bindingId: number, chapters: number[],
 ): Promise<number> {
@@ -503,11 +482,11 @@ export async function fetchWanted(
           [it.series_id, it.chapter_number]);
         // A whole chapter supersedes the parts it was split into, so they go with it
         // rather than sitting there as a second copy waiting for a manual prune.
-        if (Number.isInteger(Number(it.chapter_number))) {
+        if (!isPart(Number(it.chapter_number))) {
           const parts = (await p.query<{ chapter_number: string; file_path: string }>(
             `SELECT chapter_number, file_path FROM chapter
-              WHERE series_id = $1 AND chapter_number <> trunc(chapter_number)
-                AND trunc(chapter_number) = $2`, [it.series_id, it.chapter_number])).rows;
+              WHERE series_id = $1 AND ${IS_PART_SQL}
+                AND ${BASE_OF_SQL} = $2`, [it.series_id, it.chapter_number])).rows;
           for (const part of parts) {
             try { rmSync(part.file_path); } catch { /* a missing file is already gone */ }
             await p.query("DELETE FROM chapter WHERE series_id = $1 AND chapter_number = $2",

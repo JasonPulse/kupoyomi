@@ -6,6 +6,7 @@ import { canonical } from "./seed.js";
 import { gql } from "./suwayomi.js";
 import { resolveManga } from "./match.js";
 import { heldChapters } from "./held.js";
+import { isPart } from "./chapters.js";
 
 /**
  * Canonical chapter filename: "{Series} - c0070 [Group].cbz". Zero-padded so a plain
@@ -14,7 +15,7 @@ import { heldChapters } from "./held.js";
  */
 export const chapterFilename = (title: string, num: string, scanlator: string | null): string => {
   const n = Number(num);
-  const padded = Number.isInteger(n) ? String(n).padStart(4, "0") : n.toFixed(2).padStart(7, "0");
+  const padded = isPart(n) ? n.toFixed(2).padStart(7, "0") : String(n).padStart(4, "0");
   const group = scanlator ? ` [${canonical(scanlator)}]` : "";
   return `${canonical(title)} - c${padded}${group}.cbz`;
 };

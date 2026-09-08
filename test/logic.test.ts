@@ -241,7 +241,8 @@ test("a whole chapter already held as parts is not fetched again", () => {
  * Every part was dropped, the scan queued nothing, and the downloader said it had nothing
  * to do while the source held all four.
  */
-const { preferWholeChapters } = await import("../src/fetch.js");
+const { preferWholeChapters, wholesCovered, missingWholes, supersededByWhole,
+  wholesHeldAsParts } = await import("../src/chapters.js");
 
 test("a chapter offered only in parts is taken as parts", () => {
   const offered = [1.1, 1.2, 1.3, 1.4, 2, 3, 4, 5, 6, 7.1, 7.2, 7.3, 8.1, 8.2, 8.3,
@@ -267,4 +268,60 @@ test("a part is refused when the same source also offers the whole", () => {
   assert.deepEqual(preferWholeChapters([25.1, 25.2], new Set()), [25.1, 25.2]);
   // Whole chapters are never touched.
   assert.deepEqual(preferWholeChapters([1, 2, 3], new Set()), [1, 2, 3]);
+});
+
+/**
+ * One rule, one implementation.
+ *
+ * These rules were written five times over, each slightly different, so fixing the
+ * downloader left the migrate page, the source preview, the Paperback API and the gap
+ * report each still wrong in its own way. The grep below is the guard: a part belongs to
+ * the chapter it is part of, and nothing outside src/chapters.ts gets to decide that.
+ */
+test("no module reimplements the whole-versus-part rule", async () => {
+  const { readdirSync, readFileSync, statSync } = await import("node:fs");
+  const walk = (dir: string): string[] => readdirSync(dir).flatMap((f) => {
+    const full = `${dir}/${f}`;
+    return statSync(full).isDirectory() ? walk(full) : full.endsWith(".ts") ? [full] : [];
+  });
+
+  const offenders: string[] = [];
+  for (const file of walk("src")) {
+    if (file.endsWith("src/chapters.ts")) continue;          // where the rule lives
+    if (file.endsWith("src/chapternum.ts")) continue;        // parses names, decides nothing
+    for (const [i, line] of readFileSync(file, "utf8").split("\n").entries()) {
+      if (line.trimStart().startsWith("//") || line.trimStart().startsWith("*")) continue;
+      // Number.isInteger on an id is validating an id. On a chapter number it is
+      // deciding what a decimal means, which is this module's job.
+      const arg = /Number\.isInteger\(([^)]*)\)/.exec(line)?.[1] ?? "";
+      const decidesPartness = /chapter|\bnums?\b|held|offered|part|\bn\b|\bm\b/i.test(arg);
+      // Mapping a part onto its chapter, in either language.
+      const mapsPartToBase = /Math\.trunc/.test(line)
+        || (/trunc\(chapter_number\)/.test(line) && !/IS_PART_SQL|BASE_OF_SQL/.test(line));
+      if (decidesPartness || mapsPartToBase) offenders.push(`${file}:${i + 1} ${line.trim().slice(0, 74)}`);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    `these decide the whole-versus-part rule themselves:\n  ${offenders.join("\n  ")}`);
+});
+
+test("every consumer agrees a source carrying 7.1 carries chapter 7", () => {
+  const source = [7.1, 7.2, 7.3, 8.1, 8.2, 8.3, 10];
+  // Coverage, which the migrate page, the preview, the Paperback API and the gap report
+  // all now ask the same way.
+  const carried = wholesCovered(source);
+  assert.ok(carried.has(7), "chapter 7 is carried");
+  assert.ok(carried.has(8), "chapter 8 is carried");
+  assert.ok(carried.has(10), "and a whole chapter still is");
+
+  // Holding the parts closes the gap, or a downloaded chapter reports missing forever.
+  assert.deepEqual(missingWholes([7.1, 7.2, 7.3, 8, 9]), [], "nothing is missing");
+  assert.deepEqual(missingWholes([1, 2, 12.3]), [3, 4, 5, 6, 7, 8, 9, 10, 11],
+    "and a lone 12.3 still proves 3 through 11 are missing");
+
+  // The superseded and held-as-parts rules are the same rule read in each direction.
+  assert.equal(supersededByWhole(8.1, new Set([8])), true);
+  assert.equal(supersededByWhole(8.1, new Set([7])), false);
+  assert.equal(supersededByWhole(8, new Set([8])), false, "a whole chapter is never a duplicate");
+  assert.deepEqual([...wholesHeldAsParts([8.1, 8.2, 9])], [8]);
 });

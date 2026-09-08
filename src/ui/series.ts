@@ -140,7 +140,7 @@ export async function seriesPage(id: number, said?: string): Promise<string> {
            <input type="hidden" name="chapter" value="${fmt(held[0] ?? null)}">
            <button class="weak" type="submit">mark all read</button></form>
          <a class="series" href="/series/${id}/remove" style="margin-left:auto;color:#9b3226">remove from library</a>
-         ${gaps.length > 0 ? `<a class="series" href="/series/${id}/gaps">fill ${gaps.length} gaps</a>` : ""}
+
          <span class="hint">${gaps.length > 0
            ? `missing inside your range: ${gaps.slice(0, 18).join(", ")}${gaps.length > 18 ? " ..." : ""}`
            : "no gaps"}${

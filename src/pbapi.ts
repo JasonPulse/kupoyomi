@@ -1,5 +1,6 @@
 import { db } from "./db.js";
 import { listEntries, pageEntries, readEntry } from "./unzip.js";
+import { wholesCovered } from "./chapters.js";
 
 /**
  * The API the Paperback extension talks to.
@@ -176,7 +177,7 @@ export async function bindingAvailability(bindingId: number): Promise<{
     const nums = (await gql<{ manga: { chapters: { nodes: Array<{ chapterNumber: number | null }> } } }>(
       `{ manga(id:${mangaId}) { chapters { nodes { chapterNumber } } } }`)).manga.chapters.nodes
       .map((c) => c.chapterNumber).filter((n): n is number => n !== null);
-    const whole = new Set(nums.filter(Number.isInteger));
+    const whole = wholesCovered(nums);
     let gaps = 0;
     if (whole.size > 0) {
       for (let i = Math.min(...whole); i <= Math.max(...whole); i++) if (!whole.has(i)) gaps++;

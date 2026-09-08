@@ -292,8 +292,8 @@ es.addEventListener('progress', e => {
   const p = JSON.parse(e.data);
   status.textContent = p.done+'/'+p.total+' sources searched, '+groups.size+' titles, '+seen+' results';
 });
-es.addEventListener('done', () => { es.close(); status.textContent += ' — done'; });
-es.onerror = () => { es.close(); status.textContent += ' — connection ended'; };
+es.addEventListener('done', () => { es.close(); status.textContent += ', done'; });
+es.onerror = () => { es.close(); status.textContent += ', connection ended'; };
 `;
 
 const EXTRA_CSS = `

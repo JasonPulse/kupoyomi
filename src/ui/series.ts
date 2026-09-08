@@ -118,10 +118,10 @@ export async function seriesPage(id: number, said?: string): Promise<string> {
        <table style="margin-top:12px" id="bindings">
          <tr><th>source</th><th>chapters</th><th>range</th>
              <th title="chapters past what you hold">new</th>
-             <th title="chapters you hold that this source does not carry -- you keep the files">not carried</th><th></th></tr>
+             <th title="chapters you hold that this source does not carry. You keep the files">not carried</th><th></th></tr>
          ${bindRows || `<tr><td colspan="6" class="bad">no source bound${s.muted
            ? " (archived, which is deliberate: nothing will look for new chapters)"
-           : " &mdash; nothing will ever look for new chapters"
+           : ". Nothing will ever look for new chapters"
          }</td></tr>`}</table>
        <div class="actions">
          <a href="/search?q=${encodeURIComponent(s.title)}&series=${id}" style="text-decoration:none">

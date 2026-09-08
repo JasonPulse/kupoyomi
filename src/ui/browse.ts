@@ -63,7 +63,7 @@ export async function browseIndex(): Promise<string> {
          Each one exposes its own genre and status filters.</div>
        <table><tr><th>source</th><th>lang</th><th>listings</th></tr>${rows}</table></div>
      <div class="card"><div class="title">Need a different site?</div>
-       <div class="meta"><a class="series" href="/extensions">Install another extension</a> &mdash;
+       <div class="meta"><a class="series" href="/extensions">Install another extension</a>.
          1372 available, and only what you install is searched.</div></div>`);
 }
 
@@ -172,8 +172,8 @@ es.addEventListener('hit', e => {
 es.addEventListener('done', () => {
   finished = true; es.close();
   if (n === 0 && !status.innerHTML.includes('error')) {
-    status.innerHTML = '<span class="warn">this source has no browsable listing</span> — ' +
-      'some sources only answer searches. <a href="/search">Search instead</a>, or pick another source.';
+    status.innerHTML = '<span class="warn">this source has no browsable listing</span>. ' +
+      'Some sources only answer searches. <a href="/search">Search instead</a>, or pick another source.';
   } else if (n > 0) { status.textContent = n + ' titles'; }
 });
 // A silent onerror was why the page sat on 'loading' whenever anything went wrong.

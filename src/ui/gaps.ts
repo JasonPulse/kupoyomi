@@ -41,7 +41,7 @@ export async function gapsPage(seriesId: number): Promise<string> {
      </div>
      <div class="card"><h2>Sources carrying the missing chapters</h2>
        <table><tr><th>source</th><th>covers</th><th>chapters it has</th><th></th></tr>
-       ${rows || `<tr><td colspan="4" class="dim">no installed source carries any of the missing chapters
-         &mdash; they may not exist anywhere, which is common for delisted early chapters</td></tr>`}</table>
+       ${rows || `<tr><td colspan="4" class="dim">no installed source carries any of the missing chapters.
+         They may not exist anywhere, which is common for delisted early chapters</td></tr>`}</table>
      </div>`);
 }

@@ -231,3 +231,40 @@ test("a whole chapter already held as parts is not fetched again", () => {
   // A part held for a chapter we also hold whole changes nothing.
   assert.deepEqual(wanted([8]), [], "and it stays skipped however often it is offered");
 });
+
+/**
+ * Parts are refused when a whole exists, not on sight.
+ *
+ * The rule was "whole chapters only", which read the same as "never take a decimal" and
+ * cost four chapters. MangaDex carries The Despised Level 0 Incompetent Explorer as
+ * 7.1 7.2 7.3, 8.1 8.2 8.3, 9.1 9.2 9.3, 11.1 11.2 and offers no whole 7, 8, 9 or 11.
+ * Every part was dropped, the scan queued nothing, and the downloader said it had nothing
+ * to do while the source held all four.
+ */
+const { preferWholeChapters } = await import("../src/fetch.js");
+
+test("a chapter offered only in parts is taken as parts", () => {
+  const offered = [1.1, 1.2, 1.3, 1.4, 2, 3, 4, 5, 6, 7.1, 7.2, 7.3, 8.1, 8.2, 8.3,
+    9.1, 9.2, 9.3, 10, 11.1, 11.2, 12, 13.1, 13.2, 14, 15, 16, 17];
+  const held = new Set([1, 2, 3, 4, 5, 6, 10, 12, 13, 14, 15, 16, 17]);
+  const take = preferWholeChapters(offered, held);
+
+  // The four that were unreachable are now offered, as their parts.
+  for (const n of [7.1, 7.2, 7.3, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 11.1, 11.2]) {
+    assert.ok(take.includes(n), `chapter ${n} is the only form this source has`);
+  }
+  // Parts of chapters already held whole are still refused, or chapter 1 arrives a
+  // second time in four pieces.
+  for (const n of [1.1, 1.2, 1.3, 1.4, 13.1, 13.2]) {
+    assert.equal(take.includes(n), false, `${n} duplicates a whole chapter already held`);
+  }
+});
+
+test("a part is refused when the same source also offers the whole", () => {
+  // Both forms on offer means the whole is the one to take.
+  assert.deepEqual(preferWholeChapters([25, 25.1, 25.2], new Set()), [25]);
+  // And with no whole anywhere, the parts are the chapter.
+  assert.deepEqual(preferWholeChapters([25.1, 25.2], new Set()), [25.1, 25.2]);
+  // Whole chapters are never touched.
+  assert.deepEqual(preferWholeChapters([1, 2, 3], new Set()), [1, 2, 3]);
+});

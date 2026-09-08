@@ -93,7 +93,7 @@ export async function downloadsPage(): Promise<string> {
        document.getElementById('t-day').textContent = d.rate.lastDay;
        document.getElementById('t-stuck').textContent = d.stuck.length;
        document.getElementById('active').innerHTML = d.active.length === 0
-         ? '<div style="color:var(--ink-dim)">nothing in flight — the scheduler fetches a batch every 15 minutes</div>'
+         ? '<div style="color:var(--ink-dim)">nothing in flight. The scheduler fetches a batch every 15 minutes</div>'
          : '<table><tr><th>series</th><th>chapter</th><th>pages</th><th>elapsed</th></tr>' + d.active.map(a =>
              '<tr><td><a href="/series/'+a.seriesId+'" class="series">'+a.title+'</a></td>'+
              '<td>ch '+a.chapter+'</td>'+

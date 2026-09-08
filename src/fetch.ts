@@ -69,22 +69,6 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
       `{ manga(id:${mangaId}) { chapters { nodes { chapterNumber } } } }`)).manga.chapters.nodes
       .map((c) => c.chapterNumber).filter((n): n is number => n !== null);
     const { kept: offeredAll, dropped } = withoutOutliers(offered);
-    // Whole chapters only. A decimal is nearly always one chapter split by a release
-    // group, so 25.1 and 25.2 are chapter 25 twice and reading it means reading the same
-    // pages again. Set FETCH_WHOLE_ONLY=false to take them.
-    // Global rule, per-series exception. A source that publishes only halves would
-    // otherwise stop delivering entirely.
-    const wholeOnly = (process.env["FETCH_WHOLE_ONLY"] ?? "true") !== "false" && !b.take_splits;
-    const offered2 = wholeOnly ? offeredAll.filter((n) => Number.isInteger(n)) : offeredAll;
-    const skippedSplits = offeredAll.length - offered2.length;
-    if (dropped.length > 0) {
-      console.log(`  ${b.title.slice(0, 40)}: ignoring ${dropped.join(", ")} -- `
-        + `${dropped.length === 1 ? "that number is" : "those numbers are"} hundreds above the rest of the run`);
-    }
-    if (skippedSplits > 0) {
-      console.log(`  ${b.title.slice(0, 40)}: skipping ${skippedSplits} part-numbered chapter${
-        skippedSplits === 1 ? "" : "s"}`);
-    }
     const heldNums = (await p.query<{ chapter_number: string }>(
       "SELECT chapter_number FROM chapter WHERE series_id = $1", [b.series_id])).rows
       .map((r) => Number(r.chapter_number));
@@ -93,6 +77,24 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
     // so fetching the whole 8 is fetching the same pages a third time. It was queued for
     // exactly that and kept failing against a source that 500s.
     const heldAsParts = new Set(heldNums.filter((n) => !Number.isInteger(n)).map(Math.trunc));
+
+    const wholeOnly = (process.env["FETCH_WHOLE_ONLY"] ?? "true") !== "false" && !b.take_splits;
+    const offered2 = wholeOnly ? preferWholeChapters(offeredAll, held) : offeredAll;
+    const skippedSplits = offeredAll.length - offered2.length;
+    const partsTaken = offered2.filter((n) => !Number.isInteger(n)).length;
+    if (dropped.length > 0) {
+      console.log(`  ${b.title.slice(0, 40)}: ignoring ${dropped.join(", ")}, `
+        + `${dropped.length === 1 ? "that number is" : "those numbers are"} hundreds above the rest of the run`);
+    }
+    if (skippedSplits > 0) {
+      console.log(`  ${b.title.slice(0, 40)}: skipping ${skippedSplits} part-numbered chapter${
+        skippedSplits === 1 ? "" : "s"} that arrive whole as well`);
+    }
+    if (wholeOnly && partsTaken > 0) {
+      const bases = [...new Set(offered2.filter((n) => !Number.isInteger(n)).map(Math.trunc))];
+      console.log(`  ${b.title.slice(0, 40)}: taking ${partsTaken} parts for chapter${
+        bases.length === 1 ? "" : "s"} ${bases.join(", ")}, which this source has no whole version of`);
+    }
 
     const moved = await pointQueueAt(b.series_id, b.id, offered2);
     if (moved > 0) console.log(`  ${b.title.slice(0, 40)}: moved ${moved} queued chapters to ${b.source_name}`);
@@ -134,6 +136,26 @@ export type WantedRow = {
  * and carrying them across would bill the new source for the old one's record in the
  * health metric.
  */
+/**
+ * Drops parts that duplicate a chapter available whole, and keeps the ones that do not.
+ *
+ * A decimal is usually one chapter split by a release group, so taking 25.1 and 25.2
+ * alongside 25 means reading the same pages twice. Refusing every decimal outright is a
+ * different thing, and it silently cost four chapters: MangaDex carries one series as
+ * 7.1 7.2 7.3, 8.1 8.2 8.3, 9.1 9.2 9.3, 11.1 11.2 and offers no whole 7, 8, 9 or 11 at
+ * all. Every part was dropped, the scan queued nothing, and the downloader correctly said
+ * it had nothing to do while four chapters sat on a source that had them.
+ *
+ * So a part is refused only when there is a whole to prefer: the source offers that whole,
+ * or we already hold it. Otherwise the parts are the chapter, and the parts are what we
+ * take.
+ */
+export function preferWholeChapters(offered: number[], held: Set<number>): number[] {
+  const wholes = new Set(offered.filter((n) => Number.isInteger(n)));
+  return offered.filter((n) => Number.isInteger(n)
+    || (!wholes.has(Math.trunc(n)) && !held.has(Math.trunc(n))));
+}
+
 export async function pointQueueAt(
   seriesId: number, bindingId: number, chapters: number[],
 ): Promise<number> {

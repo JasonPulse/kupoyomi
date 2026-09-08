@@ -97,7 +97,12 @@ export async function findGapSources(seriesId: number, concurrency = 6): Promise
         const nums = (await gql<{ manga: { chapters: { nodes: Array<{ chapterNumber: number | null }> } } }>(
           `{ manga(id:${hit.id}) { chapters { nodes { chapterNumber } } } }`)).manga.chapters.nodes
           .map((c) => c.chapterNumber).filter((n): n is number => n !== null);
-        const covers = [...want].filter((n) => nums.includes(n)).sort((a, b) => a - b);
+        // A source carrying chapter 7 only as 7.1, 7.2 and 7.3 does carry chapter 7. An
+        // exact match missed that and reported "no installed source carries any of the
+        // missing chapters" for a series whose own active source had all four, split.
+        const covered = new Set<number>();
+        for (const m of nums) { covered.add(m); covered.add(Math.trunc(m)); }
+        const covers = [...want].filter((n) => covered.has(n)).sort((a, b) => a - b);
         if (covers.length > 0) {
           out.push({ sourceId: src.id, sourceName: src.displayName, mangaId: hit.id,
             url: hit.url, title: hit.title, covers, chapters: nums.length });

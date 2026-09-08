@@ -20,7 +20,7 @@ export async function confirmRemovalPage(seriesId: number): Promise<string> {
        <table>
          <tr><th>what</th><th>effect</th></tr>
          <tr><td>Database</td><td>the series, its ${p.chapters} chapter rows, its bindings,
-           reading progress and anything queued &mdash; all removed</td></tr>
+           reading progress and anything queued, all removed</td></tr>
          <tr><td>Library files</td><td><span class="dim">${esc(p.canonicalDir)}</span></td></tr>
          ${p.sharedFiles > 0 ? `<tr><td>Disk space</td><td><span class="warn">${p.sharedFiles}
            of ${p.canonicalFiles} files are hardlinks with another copy in the old Suwayomi tree,
@@ -34,7 +34,7 @@ export async function confirmRemovalPage(seriesId: number): Promise<string> {
          <label><input type="checkbox" name="files" value="1" checked> delete the library files</label>
          ${p.legacyDirs.length > 0
            ? `<label><input type="checkbox" name="legacy" value="1"> also delete the originals
-                (${p.legacyDirs.reduce((a, d) => a + d.files, 0)} files) &mdash; this is what actually frees the space</label>`
+                (${p.legacyDirs.reduce((a, d) => a + d.files, 0)} files). This is what actually frees the space</label>`
            : ""}
          <button type="submit">remove permanently</button>
          <a class="series" href="/series/${p.seriesId}">cancel</a>

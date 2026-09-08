@@ -23,7 +23,10 @@ export async function findGaps(seriesId: number): Promise<GapReport> {
   if (!s) throw new Error(`no series ${seriesId}`);
   const held = (await p.query<{ n: string }>(
     "SELECT chapter_number AS n FROM chapter WHERE series_id = $1", [seriesId])).rows.map((r) => Number(r.n));
-  const queuedAll = new Set((await p.query<{ n: string }>(
+  // Queued as parts is queued. Chapters 9 and 11 sat in the queue as 9.1 9.2 9.3 and
+  // 11.1 11.2 and were still reported as needing another source, which sends you looking
+  // for a source for chapters already on their way from the one in use.
+  const queuedAll = wholesCovered((await p.query<{ n: string }>(
     "SELECT chapter_number AS n FROM wanted WHERE series_id = $1 AND state <> 'done'", [seriesId])).rows
     .map((r) => Number(r.n)));
 

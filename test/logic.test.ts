@@ -242,7 +242,7 @@ test("a whole chapter already held as parts is not fetched again", () => {
  * to do while the source held all four.
  */
 const { preferWholeChapters, wholesCovered, missingWholes, supersededByWhole,
-  wholesHeldAsParts } = await import("../src/chapters.js");
+  wholesHeldAsParts, compareOffering } = await import("../src/chapters.js");
 
 test("a chapter offered only in parts is taken as parts", () => {
   const offered = [1.1, 1.2, 1.3, 1.4, 2, 3, 4, 5, 6, 7.1, 7.2, 7.3, 8.1, 8.2, 8.3,
@@ -294,7 +294,12 @@ test("no module reimplements the whole-versus-part rule", async () => {
       // Number.isInteger on an id is validating an id. On a chapter number it is
       // deciding what a decimal means, which is this module's job.
       const arg = /Number\.isInteger\(([^)]*)\)/.exec(line)?.[1] ?? "";
-      const decidesPartness = /chapter|\bnums?\b|held|offered|part|\bn\b|\bm\b/i.test(arg);
+      // Passed as a callback rather than called, which is how match.ts kept its own copy
+      // of the rule through the first sweep: filter(Number.isInteger) has no argument to
+      // inspect, so a check that only looked at arguments never saw it.
+      const asCallback = /\(Number\.isInteger\)/.test(line);
+      const decidesPartness = asCallback
+        || /chapter|\bnums?\b|held|offered|part|\bn\b|\bm\b/i.test(arg);
       // Mapping a part onto its chapter, in either language.
       const mapsPartToBase = /Math\.trunc/.test(line)
         || (/trunc\(chapter_number\)/.test(line) && !/IS_PART_SQL|BASE_OF_SQL/.test(line));
@@ -324,4 +329,61 @@ test("every consumer agrees a source carrying 7.1 carries chapter 7", () => {
   assert.equal(supersededByWhole(8.1, new Set([7])), false);
   assert.equal(supersededByWhole(8, new Set([8])), false, "a whole chapter is never a duplicate");
   assert.deepEqual([...wholesHeldAsParts([8.1, 8.2, 9])], [8]);
+});
+
+/**
+ * The comparison that decides whether a source is worth switching to.
+ *
+ * Written four times: the migrate page, the series page's per-binding row, the importer's
+ * stored comparison, and the CLI's compare. All four counted exact numbers, so a source
+ * carrying chapter 7 as three parts reported it as "not carried" while carrying it, and
+ * counted three fills where one chapter was gained.
+ */
+test("a source carrying a chapter in parts is not counted as missing it", () => {
+  // Holds 1 to 6 whole. The source has 7 only as parts, and does not carry 3 at all.
+  const held = new Set([1, 2, 4, 5, 6]);
+  const offered = [1, 2, 3, 4, 5, 6, 7.1, 7.2, 7.3];
+  const c = compareOffering(offered, held);
+
+  assert.equal(c.newBeyond, 1, "chapter 7 is one chapter gained, not three");
+  assert.equal(c.fillsGaps, 1, "and chapter 3 is the one hole it fills");
+  assert.equal(c.notCarried, 0, "it carries everything held, so nothing is lost by moving");
+  assert.equal(c.heldMax, 6);
+});
+
+test("a chapter held whole is not counted as lost to a source that splits it", () => {
+  // The failure this replaced: held 7 whole, source has 7.1 7.2 7.3, reported as lost.
+  const c = compareOffering([7.1, 7.2, 7.3], new Set([7]));
+  assert.equal(c.notCarried, 0, "the source has chapter 7, in pieces");
+  assert.equal(c.newBeyond, 0, "and offers nothing beyond it");
+});
+
+test("what a source genuinely lacks is still counted", () => {
+  const c = compareOffering([1, 2], new Set([1, 2, 3, 4]));
+  assert.equal(c.notCarried, 2, "chapters 3 and 4 really are not there");
+});
+
+/**
+ * The attempt limit was written out five times, and the library page still had a hardcoded
+ * 4 after the limit moved to 6, so it called chapters dead that the fetcher meant to retry.
+ */
+test("one place decides the attempt limit", async () => {
+  const { maxAttempts } = await import("../src/config.js");
+  const before = process.env["FETCH_MAX_ATTEMPTS"];
+  process.env["FETCH_MAX_ATTEMPTS"] = "9";
+  assert.equal(maxAttempts(), 9, "every page reads the configured limit");
+  process.env["FETCH_MAX_ATTEMPTS"] = "0";
+  assert.equal(maxAttempts(), 1, "and never zero, which would retry nothing ever");
+  if (before === undefined) delete process.env["FETCH_MAX_ATTEMPTS"];
+  else process.env["FETCH_MAX_ATTEMPTS"] = before;
+});
+
+/**
+ * Every page and query that needs Suwayomi's HTTP root built it from the same replace(),
+ * and one of the three read the environment directly rather than the parsed config.
+ */
+test("the suwayomi http base is derived in one place", async () => {
+  const { suwayomiHttpBase } = await import("../src/config.js");
+  assert.ok(!suwayomiHttpBase().endsWith("/api/graphql"), "the graphql suffix is stripped");
+  assert.ok(suwayomiHttpBase().startsWith("http"), "and it is still a url");
 });

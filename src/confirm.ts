@@ -3,6 +3,8 @@ import { compare, resolveManga } from "./match.js";
 import { heldChapterNumbers } from "./held.js";
 import { canonical } from "./seed.js";
 import type { Candidate } from "./match.js";
+import { compareOffering } from "./chapters.js";
+import { useSource } from "./sources.js";
 
 type Row = {
   id: number; folder: string; dead_source: string | null; file_count: number;
@@ -17,12 +19,7 @@ const cache = async (
   latest: Array<{ chapter: number | null; uploaded: string; scanlator: string | null }>,
   note: string | null, offered: number[], held: Set<number>,
 ): Promise<void> => {
-  // Split the comparison into the three things it was previously smearing together.
-  const heldMax = held.size > 0 ? Math.max(...held) : 0;
-  const offeredSet = new Set(offered);
-  const newBeyond = offered.filter((n) => n > heldMax).length;
-  const fillsGaps = offered.filter((n) => n <= heldMax && !held.has(n)).length;
-  const notCarried = [...held].filter((n) => !offeredSet.has(n)).length;
+  const { newBeyond, fillsGaps, notCarried } = compareOffering(offered, held);
   const newCount = newBeyond + fillsGaps;
   const lostCount = notCarried;
   const lastUpload = latest.map((l) => l.uploaded).sort().at(-1) ?? null;
@@ -136,15 +133,12 @@ export async function confirmCandidate(id: number, mangaId: number): Promise<voi
       "SELECT id, source_manga_id, source_name FROM series_binding WHERE series_id = $1 AND role = 'active'",
       [seriesId])).rows[0];
     if (existing && existing.source_manga_id !== pick.mangaId) {
-      await client.query("UPDATE series_binding SET role = 'former' WHERE id = $1", [existing.id]);
       console.log(`  ${existing.source_name} is no longer the source, kept for what it delivered`);
     }
-    await client.query(
-      `INSERT INTO series_binding (series_id, source_id, source_name, source_manga_id, source_url, role)
-       VALUES ($1,$2,$3,$4,$5,'active')
-       ON CONFLICT (series_id, source_id, source_manga_id)
-         DO UPDATE SET role = 'active', source_url = EXCLUDED.source_url`,
-      [seriesId, pick.sourceId, pick.sourceName, pick.mangaId, pick.url ?? null]);
+    await useSource(client, seriesId, {
+      sourceId: pick.sourceId, sourceName: pick.sourceName,
+      url: pick.url ?? null, mangaId: pick.mangaId,
+    });
     await client.query("UPDATE import_candidate SET confirmed_series_id = $1 WHERE id = $2", [seriesId, id]);
     await client.query("COMMIT");
     console.log(`confirmed "${title}" -> ${pick.sourceName} (series ${seriesId})`);

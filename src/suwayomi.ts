@@ -73,6 +73,41 @@ export const installedExtensions = async (): Promise<Extension[]> =>
     `{ extensions(condition:{isInstalled:true}) { nodes { pkgName repo versionName } } }`,
   )).extensions.nodes;
 
+/**
+ * Makes a source fetch a manga and its chapter list before we read it.
+ *
+ * A search result has a manga row and no chapters, so every caller that wanted a chapter
+ * count had to prime it first. Five of them wrote this mutation out inline. Never fatal:
+ * a source that is briefly unreachable is a fact about that candidate, not a reason to
+ * abandon whatever the caller was doing.
+ */
+export const primeManga = async (id: number, withChapters = true): Promise<void> => {
+  await gql(
+    `mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:${
+      withChapters ? "true" : "false"},fetchManga:true}){ clientMutationId } }`,
+    { id },
+  ).catch(() => undefined);
+};
+
+/**
+ * Just the chapter numbers a source carries, primed first.
+ *
+ * Four callers wrote this query out inline to ask the same question.
+ */
+export const chapterNumbersOf = async (id: number): Promise<number[]> => {
+  await primeManga(id);
+  return (await gql<{ manga: { chapters: { nodes: Array<{ chapterNumber: number | null }> } } }>(
+    `{ manga(id:${id}) { chapters { nodes { chapterNumber } } } }`,
+  )).manga.chapters.nodes
+    .map((c) => c.chapterNumber)
+    .filter((n): n is number => n !== null);
+};
+
+/** The search every surface uses. It was written out three times, once with a stale shape. */
+export const SOURCE_SEARCH = `mutation($src:LongString!,$q:String!){
+  fetchSourceManga(input:{source:$src,type:SEARCH,query:$q,page:1}){
+    mangas{ id title url thumbnailUrl } } }`;
+
 export const mangaChapters = async (id: number): Promise<Chapter[]> =>
   (await gql<{ manga: { chapters: { nodes: Chapter[] } } }>(
     `{ manga(id:${id}) { chapters { nodes { name pageCount chapterNumber isDownloaded scanlator uploadDate } } } }`,

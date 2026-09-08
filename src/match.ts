@@ -1,6 +1,7 @@
 import { db } from "./db.js";
 import { scanLegacyTree } from "./disk.js";
-import { gql, installedSources, sanitize } from "./suwayomi.js";
+import { gql, installedSources, sanitize, primeManga, SOURCE_SEARCH } from "./suwayomi.js";
+import { missingWholes } from "./chapters.js";
 
 export type Candidate = {
   sourceName: string; sourceId: string; mangaId: number; title: string;
@@ -19,8 +20,7 @@ export type Stranded = {
   candidates: Candidate[];
 };
 
-const SEARCH = `mutation($src:LongString!,$q:String!){
-  fetchSourceManga(input:{source:$src,type:SEARCH,query:$q,page:1}){ mangas{ id title url } } }`;
+const SEARCH = SOURCE_SEARCH;
 
 export async function findHomes(opts: { only?: string; limit?: number; includeNsfw?: boolean } = {}) {
   const [disk, sources] = await Promise.all([scanLegacyTree(), installedSources()]);
@@ -97,23 +97,14 @@ export async function findHomes(opts: { only?: string; limit?: number; includeNs
  * there is no way around the round trip.
  */
 export async function compare(mangaId: number) {
-  try {
-    await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
-      { id: mangaId });
-  } catch {
-    // A source that reports no chapters, or is briefly unreachable, is a fact about
-    // that candidate rather than a reason to abandon the whole comparison. Fall
-    // through and report whatever is already known.
-  }
+  // A source that reports no chapters, or is briefly unreachable, is a fact about that
+  // candidate rather than a reason to abandon the comparison, so priming never throws.
+  await primeManga(mangaId);
   const d = await gql<{ manga: { title: string; source: { displayName: string } | null;
     chapters: { totalCount: number; nodes: Array<{ chapterNumber: number | null; uploadDate: string | null; scanlator: string | null }> } } }>(
     `{ manga(id:${mangaId}){ title source{displayName} chapters{ totalCount nodes{ chapterNumber uploadDate scanlator } } } }`);
   const nums = [...new Set(d.manga.chapters.nodes.map((c) => c.chapterNumber).filter((n): n is number => n !== null))].sort((a, b) => a - b);
-  const whole = new Set(nums.filter(Number.isInteger));
-  const missing: number[] = [];
-  if (whole.size > 0) {
-    for (let i = Math.min(...whole); i <= Math.max(...whole); i++) if (!whole.has(i)) missing.push(i);
-  }
+  const missing = missingWholes(nums);
   const dated = d.manga.chapters.nodes.filter((c) => c.uploadDate).sort((a, b) => Number(a.uploadDate) - Number(b.uploadDate));
   return {
     offered: nums,

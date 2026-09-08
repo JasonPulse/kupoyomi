@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { esc, page, news } from "./layout.js";
 import { fmt, ago } from "../held.js";
+import { maxAttempts } from "../config.js";
 
 type Row = {
   id: number; title: string; status: string; muted: boolean; unbound: boolean;
@@ -44,7 +45,7 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
             (SELECT count(*)::int FROM wanted w
               WHERE w.series_id = s.id AND w.state <> 'done') AS wanted,
             (SELECT count(*)::int FROM wanted w
-              WHERE w.series_id = s.id AND w.state = 'failed' AND w.attempts >= 4) AS failed
+              WHERE w.series_id = s.id AND w.state = 'failed' AND w.attempts >= ${maxAttempts()}) AS failed
        FROM series s LEFT JOIN chapter c ON c.series_id = s.id
       ${q ? "WHERE s.title ILIKE $1" : ""}
       GROUP BY s.id ORDER BY s.title`, q ? [`%${q}%`] : [])).rows;
@@ -81,11 +82,12 @@ export async function libraryPage(q?: string, view = "grid"): Promise<string> {
       ${rows.map((r) => `<tr>
         <td><a href="/series/${r.id}">${esc(r.title)}</a>${
           r.muted ? " (muted)" : ""}${r.status === "COMPLETED" ? " (finished)" : ""}</td>
-        <td>${r.held} <span class="dim">${fmt(r.lo)}&ndash;${fmt(r.hi)}</span></td>
+        <td>${r.held} <span class="dim">${fmt(r.lo)} to ${fmt(r.hi)}</span></td>
         <td>${r.wanted > 0 ? r.wanted : '<span class="dim">-</span>'}${
           r.failed > 0 ? ` <b>(${r.failed} stuck)</b>` : ""}</td>
         <td class="dim">${esc(r.source ?? "none")}</td>
-        <td class="dim">${esc(ago(r.last_upload, today))}${r.stalled_since && !r.muted ? " (quiet)" : ""}</td>
+        <td class="dim">${esc(ago(r.last_upload, today))}${
+          r.stalled_since && !r.muted ? " (no updates found)" : ""}</td>
       </tr>`).join("") || '<tr><td colspan="5" class="dim">nothing matches</td></tr>'}
     </table>`);
 

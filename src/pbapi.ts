@@ -1,6 +1,7 @@
 import { db } from "./db.js";
 import { listEntries, pageEntries, readEntry } from "./unzip.js";
-import { wholesCovered } from "./chapters.js";
+import { wholesCovered, missingWholes, compareOffering, heldFor } from "./chapters.js";
+import { chapterNumbersOf } from "./suwayomi.js";
 
 /**
  * The API the Paperback extension talks to.
@@ -158,35 +159,24 @@ export async function bindingAvailability(bindingId: number): Promise<{
   sourceName: string; chapters: number; lo: number | null; hi: number | null;
   gaps: number; newBeyond: number; notCarried: number; error?: string;
 }> {
-  const { gql } = await import("./suwayomi.js");
   const { resolveManga } = await import("./match.js");
   const b = (await db().query<{ series_id: number; source_id: string; source_name: string; source_url: string | null; title: string }>(
     `SELECT b.series_id, b.source_id, b.source_name, b.source_url, s.title
        FROM series_binding b JOIN series s ON s.id = b.series_id WHERE b.id = $1`, [bindingId])).rows[0];
   if (!b) throw new Error("no such binding");
 
-  const held = new Set((await db().query<{ chapter_number: string }>(
-    "SELECT chapter_number FROM chapter WHERE series_id = $1", [b.series_id])).rows.map((r) => Number(r.chapter_number)));
-  const heldMax = held.size > 0 ? Math.max(...held) : 0;
+  const held = await heldFor(b.series_id);
 
   try {
     if (!b.source_url) throw new Error("binding has no source url");
     const mangaId = await resolveManga(b.source_id, b.title, b.source_url);
-    await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
-      { id: mangaId }).catch(() => undefined);
-    const nums = (await gql<{ manga: { chapters: { nodes: Array<{ chapterNumber: number | null }> } } }>(
-      `{ manga(id:${mangaId}) { chapters { nodes { chapterNumber } } } }`)).manga.chapters.nodes
-      .map((c) => c.chapterNumber).filter((n): n is number => n !== null);
-    const whole = wholesCovered(nums);
-    let gaps = 0;
-    if (whole.size > 0) {
-      for (let i = Math.min(...whole); i <= Math.max(...whole); i++) if (!whole.has(i)) gaps++;
-    }
+    const nums = await chapterNumbersOf(mangaId);
+    const cmp = compareOffering(nums, held);
     return {
       sourceName: b.source_name, chapters: nums.length,
       lo: nums.length ? Math.min(...nums) : null, hi: nums.length ? Math.max(...nums) : null,
-      gaps, newBeyond: nums.filter((n) => n > heldMax).length,
-      notCarried: [...held].filter((n) => !nums.includes(n)).length,
+      gaps: missingWholes(nums).length,
+      newBeyond: cmp.newBeyond, notCarried: cmp.notCarried,
     };
   } catch (err) {
     return { sourceName: b.source_name, chapters: 0, lo: null, hi: null, gaps: 0,

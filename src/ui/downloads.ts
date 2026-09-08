@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { esc, page, news } from "./layout.js";
 import { fmt } from "../held.js";
+import { maxAttempts } from "../config.js";
 
 export type Live = {
   active: Array<{ title: string; seriesId: number; chapter: string; done: number | null; total: number | null; secs: number }>;
@@ -35,7 +36,7 @@ export async function liveState(): Promise<Live> {
   const stuck = (await p.query<{ title: string; series_id: number; chapter_number: string; attempts: number; last_error: string | null }>(
     `SELECT s.title, w.series_id, w.chapter_number, w.attempts, w.last_error
        FROM wanted w JOIN series s ON s.id = w.series_id
-      WHERE w.state = 'failed' AND w.attempts >= ${Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6))}
+      WHERE w.state = 'failed' AND w.attempts >= ${maxAttempts()}
       ORDER BY s.title LIMIT 12`)).rows;
   const c = (await p.query<{ state: string; n: string }>("SELECT state, count(*) n FROM wanted GROUP BY state")).rows;
   const at = (st: string): number => Number(c.find((x) => x.state === st)?.n ?? 0);

@@ -1,13 +1,12 @@
 import { writeFileSync, mkdirSync, renameSync, existsSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { config } from "./config.js";
+import { config, suwayomiHttpBase } from "./config.js";
 import { db } from "./db.js";
-import { gql } from "./suwayomi.js";
+import { gql, primeManga } from "./suwayomi.js";
 import { resolveManga } from "./match.js";
 import { listEntries, pageEntries, readEntry } from "./unzip.js";
 import { imageSize, coverScore } from "./imgsize.js";
 
-const httpBase = (): string => config.suwayomiUrl.replace(/\/api\/graphql\/?$/, "");
 
 /**
  * Pulls the synopsis and cover for a series from its bound source.
@@ -56,6 +55,40 @@ export function looksLikeSiteCopy(text: string): boolean {
  * because every route to a cover went through a source. The first page of the earliest
  * chapter is a cover: it is what the scanlator put there, and it is on disk already.
  */
+/**
+ * Writes cover.jpg for a series, atomically.
+ *
+ * Written out three times in this file alone. Always via a temp name and a rename, so a
+ * reader scanning mid-write never sees a partial image and cache it.
+ */
+function writeCover(dir: string, bytes: Buffer): string {
+  mkdirSync(dir, { recursive: true });
+  const tmp = `${dir}/.cover.part`;
+  writeFileSync(tmp, bytes);
+  renameSync(tmp, `${dir}/cover.jpg`);
+  return `${dir}/cover.jpg`;
+}
+
+/**
+ * Stores whatever the refresh managed to find.
+ *
+ * With force, a new answer replaces the old one. Without it the old one stands. "Refresh
+ * cover and synopsis" used to COALESCE in both directions, so a series that already had a
+ * cover could never get a different one and the button did nothing at all.
+ */
+async function store(
+  seriesId: number, opts: { force?: boolean },
+  found: { description: string | null; cover: string | null },
+): Promise<void> {
+  await db().query(
+    opts.force
+      ? `UPDATE series SET description = COALESCE($2, description),
+           cover_path = COALESCE($3, cover_path), metadata_at = now() WHERE id = $1`
+      : `UPDATE series SET description = COALESCE(description, $2),
+           cover_path = COALESCE($3, cover_path), metadata_at = now() WHERE id = $1`,
+    [seriesId, found.description, found.cover]);
+}
+
 async function localMetadata(
   seriesId: number, folder: string,
   opts: { force?: boolean; wantCover?: boolean; wantDescription?: boolean } = {},
@@ -103,13 +136,7 @@ async function localMetadata(
           if (score < bestScore) { bestScore = score; best = data; }
           if (bestScore < 0.35) break;                   // close enough to a page shape
         }
-        if (best) {
-          mkdirSync(dir, { recursive: true });
-          const tmp = `${dir}/.cover.part`;
-          writeFileSync(tmp, best);
-          renameSync(tmp, `${dir}/cover.jpg`);
-          cover = `${dir}/cover.jpg`;
-        }
+        if (best) cover = writeCover(dir, best);
       }
       // Suwayomi wrote a ComicInfo.xml into most adopted files, and its Summary is the
       // synopsis the source had at download time. Stale beats blank.
@@ -143,16 +170,7 @@ export async function refreshMetadata(
   // files are still on disk, so there is no reason for it to have no cover.
   if (!b?.source_url) {
     const local = await localMetadata(seriesId, s.folder, opts.force ? { force: true } : {});
-    // With force, a new answer replaces the old one. Without it, the old one stands.
-    // "Refresh cover and synopsis" used to COALESCE, so a series that already had a
-    // cover could never get a different one and the button did nothing at all.
-    await p.query(
-      opts.force
-        ? `UPDATE series SET description = COALESCE($2, description),
-             cover_path = COALESCE($3, cover_path), metadata_at = now() WHERE id = $1`
-        : `UPDATE series SET description = COALESCE(description, $2),
-             cover_path = COALESCE($3, cover_path), metadata_at = now() WHERE id = $1`,
-      [seriesId, local.description, local.cover]);
+    await store(seriesId, opts, local);
     return { cover: local.cover !== null, description: local.description !== null };
   }
 
@@ -163,21 +181,14 @@ export async function refreshMetadata(
   let d: { description: string | null; status: string; thumbnailUrl: string | null };
   try {
     const mangaId = await resolveManga(b.source_id, s.title, b.source_url);
-    await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:false,fetchManga:true}){ clientMutationId } }`,
-      { id: mangaId }).catch(() => undefined);
+    await primeManga(mangaId, false);
     d = (await gql<{ manga: { description: string | null; status: string; thumbnailUrl: string | null } }>(
       `{ manga(id:${mangaId}) { description status thumbnailUrl } }`)).manga;
   } catch (err) {
     console.log(`  ${s.title.slice(0, 40)}: source unreachable (${
       err instanceof Error ? err.message.slice(0, 70) : String(err)}), using the files instead`);
     const local = await localMetadata(seriesId, s.folder, opts.force ? { force: true } : {});
-    await p.query(
-      opts.force
-        ? `UPDATE series SET description = COALESCE($2, description),
-             cover_path = COALESCE($3, cover_path), metadata_at = now() WHERE id = $1`
-        : `UPDATE series SET description = COALESCE(description, $2),
-             cover_path = COALESCE($3, cover_path), metadata_at = now() WHERE id = $1`,
-      [seriesId, local.description, local.cover]);
+    await store(seriesId, opts, local);
     return { cover: local.cover !== null, description: local.description !== null };
   }
   if (d.description && looksLikeSiteCopy(d.description)) {
@@ -188,16 +199,9 @@ export async function refreshMetadata(
   let coverPath: string | null = null;
   if (d.thumbnailUrl) {
     try {
-      const r = await fetch(`${httpBase()}${d.thumbnailUrl}`);
+      const r = await fetch(`${suwayomiHttpBase()}${d.thumbnailUrl}`);
       if (r.ok) {
-        const dir = `${config.libraryRoot}/${s.folder}`;
-        mkdirSync(dir, { recursive: true });
-        // Written then renamed, so a reader scanning mid-download never sees a partial
-        // image and cache it.
-        const tmp = `${dir}/.cover.part`;
-        writeFileSync(tmp, Buffer.from(await r.arrayBuffer()));
-        renameSync(tmp, `${dir}/cover.jpg`);
-        coverPath = `${dir}/cover.jpg`;
+        coverPath = writeCover(`${config.libraryRoot}/${s.folder}`, Buffer.from(await r.arrayBuffer()));
       }
     } catch { /* a missing cover is not worth failing the refresh over */ }
   }
@@ -273,13 +277,9 @@ export async function setCoverFromPage(seriesId: number, chapter: string, index:
   const img = await getPage(seriesId, chapter, index);
   if (!img) throw new Error(`no page ${index} in chapter ${chapter}`);
 
-  const dir = `${config.libraryRoot}/${s.folder}`;
-  mkdirSync(dir, { recursive: true });
-  const tmp = `${dir}/.cover.part`;
-  writeFileSync(tmp, img.body);
-  renameSync(tmp, `${dir}/cover.jpg`);
+  const cover = writeCover(`${config.libraryRoot}/${s.folder}`, img.body);
   await p.query("UPDATE series SET cover_path = $2, metadata_at = now() WHERE id = $1",
-    [seriesId, `${dir}/cover.jpg`]);
+    [seriesId, cover]);
 }
 
 /** The chapters worth offering pages from: the earliest few, where a cover would be. */

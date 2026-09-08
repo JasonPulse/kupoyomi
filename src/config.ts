@@ -25,5 +25,24 @@ export const config = {
   },
 } as const;
 
+/**
+ * How many attempts a chapter gets before it stops being retried on the normal schedule.
+ *
+ * Written out five times over: the fetcher, the queue page, the downloads page, the stats
+ * endpoint, and the library page, where it was still a hardcoded 4 after the limit moved
+ * to 6. So the library called chapters dead that the fetcher fully intended to retry.
+ */
+export const maxAttempts = (): number =>
+  Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6));
+
+/**
+ * Suwayomi's HTTP root, for page images and thumbnails that are not GraphQL.
+ *
+ * The same replace() lived in fetch.ts, metadata.ts and server.ts, one of them reading
+ * the environment directly rather than the parsed config.
+ */
+export const suwayomiHttpBase = (): string =>
+  config.suwayomiUrl.replace(/\/api\/graphql\/?$/, "");
+
 /** True when the share is mounted locally, false when we have to go via kubectl. */
 export const legacyRootIsLocal = (): boolean => existsSync(config.legacyRoot);

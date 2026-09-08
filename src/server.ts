@@ -24,6 +24,22 @@ const sniffImage = (p: string): string => {
 const hashFile = (p: string): string | null => {
   try { return createHash("sha1").update(readFileSync(p)).digest("hex"); } catch { return null; }
 };
+
+/**
+ * Streams a series cover. Written twice, once for the web UI and once for Paperback, with
+ * the same query, the same 404, the same type sniff and the same cache header.
+ */
+const serveCover = (res: import("node:http").ServerResponse, seriesId: number): void => {
+  void db().query<{ cover_path: string | null }>(
+    "SELECT cover_path FROM series WHERE id = $1", [seriesId])
+    .then((r) => {
+      const cp = r.rows[0]?.cover_path;
+      if (!cp) { res.writeHead(404); res.end(); return; }
+      res.writeHead(200, { "content-type": sniffImage(cp), "cache-control": "public, max-age=3600" });
+      createReadStream(cp).on("error", () => { res.writeHead(404); res.end(); }).pipe(res);
+    })
+    .catch(() => { res.writeHead(500); res.end(); });
+};
 import { installedExtensions, installExtension, serverAbout, fetchExtensionIndex } from "./suwayomi.js";
 import { libraryPage } from "./ui/library.js";
 import { addSeries } from "./ui/search.js";
@@ -44,6 +60,8 @@ import { listSeries, getSeries, getChapters, getPages, getPage, setProgress, set
 import { createReadStream } from "node:fs";
 import { scanWanted, reclaimStuck } from "./fetch.js";
 import { startScheduler, state as schedState, checkStalled } from "./schedule.js";
+import { maxAttempts, suwayomiHttpBase } from "./config.js";
+import { resyncAfterSwitch } from "./sources.js";
 
 /**
  * Suwayomi runs on emptyDir, so on every cold start it comes up with no extensions
@@ -126,7 +144,7 @@ const stats = async (): Promise<Record<string, unknown>> => {
     wanted_outstanding: await q("SELECT count(*) n FROM wanted WHERE state <> 'done'"),
     wanted_failed: await q(
       `SELECT count(*) n FROM wanted WHERE state = 'failed'
-        AND attempts >= ${Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6))}`),
+        AND attempts >= ${maxAttempts()}`),
     last_reconcile: lastReconcile,
     scheduler: schedState,
   };
@@ -198,8 +216,7 @@ export async function serve(): Promise<void> {
     // us, so they are proxied. Cached hard: a cover for a given manga does not change.
     const th = /^\/thumb\/(\d+)$/.exec(path);
     if (th) {
-      const base = (process.env["SUWAYOMI_URL"] ?? "").replace(/\/api\/graphql\/?$/, "");
-      fetch(`${base}/api/v1/manga/${th[1]}/thumbnail`)
+      fetch(`${suwayomiHttpBase()}/api/v1/manga/${th[1]}/thumbnail`)
         .then(async (r) => {
           if (!r.ok) { res.writeHead(r.status); res.end(); return; }
           res.writeHead(200, {
@@ -229,6 +246,19 @@ export async function serve(): Promise<void> {
         res.on("finish", () => console.log(
           `pb ${req.method} ${path}${url.search} -> ${res.statusCode} in ${Date.now() - started}ms`));
       }
+      /** The extension posts form-encoded or JSON depending on the call, so both are
+       *  accepted everywhere rather than per endpoint. */
+      const posted = async (): Promise<{ seriesId: number; chapter: string; page: number; completed: boolean }> => {
+        const body = await readBody(req);
+        const f = new URLSearchParams(body);
+        const j = body.trim().startsWith("{") ? JSON.parse(body) as Record<string, unknown> : null;
+        return {
+          seriesId: Number(j?.["seriesId"] ?? f.get("seriesId")),
+          chapter: String(j?.["chapter"] ?? f.get("chapter") ?? ""),
+          page: Number(j?.["page"] ?? f.get("page") ?? 0),
+          completed: String(j?.["completed"] ?? f.get("completed") ?? "false") === "true",
+        };
+      };
       const pb = async (): Promise<void> => {
         const parts = path.split("/").filter(Boolean).slice(2);   // after api/pb
         if (parts[0] === "series" && parts.length === 1) return send(200, await listSeries(url.searchParams.get("q") ?? undefined));
@@ -254,44 +284,12 @@ export async function serve(): Promise<void> {
           res.end(img.body);
           return;
         }
-        if (parts[0] === "cover" && parts[1]) {
-          const r = await db().query<{ cover_path: string | null }>(
-            "SELECT cover_path FROM series WHERE id = $1", [Number(parts[1])]);
-          const cp = r.rows[0]?.cover_path;
-          if (!cp) { res.writeHead(404); res.end(); return; }
-          res.writeHead(200, { "content-type": sniffImage(cp), "cache-control": "public, max-age=3600" });
-          createReadStream(cp).on("error", () => { res.writeHead(404); res.end(); }).pipe(res);
-          return;
-        }
-        if (parts[0] === "progress" && parts[1] === "upto" && req.method === "POST") {
-          const body = await readBody(req);
-          const f = new URLSearchParams(body);
-          const j = body.trim().startsWith("{") ? JSON.parse(body) as Record<string, unknown> : null;
-          const seriesId = Number(j?.["seriesId"] ?? f.get("seriesId"));
-          const chapter = String(j?.["chapter"] ?? f.get("chapter") ?? "");
-          if (!Number.isInteger(seriesId) || !chapter) return send(400, { error: "seriesId and chapter required" });
-          const marked = await setProgressUpTo(seriesId, chapter);
-          return send(200, { ok: true, marked });
-        }
-        if (parts[0] === "progress" && parts[1] === "clear" && req.method === "POST") {
-          const body = await readBody(req);
-          const f = new URLSearchParams(body);
-          const j = body.trim().startsWith("{") ? JSON.parse(body) as Record<string, unknown> : null;
-          const seriesId = Number(j?.["seriesId"] ?? f.get("seriesId"));
-          const chapter = String(j?.["chapter"] ?? f.get("chapter") ?? "");
-          if (!Number.isInteger(seriesId) || !chapter) return send(400, { error: "seriesId and chapter required" });
-          await clearProgress(seriesId, chapter);
-          return send(200, { ok: true });
-        }
+        if (parts[0] === "cover" && parts[1]) { serveCover(res, Number(parts[1])); return; }
         if (parts[0] === "progress" && req.method === "POST") {
-          const body = await readBody(req);
-          const f = new URLSearchParams(body);
-          const j = body.trim().startsWith("{") ? JSON.parse(body) as Record<string, unknown> : null;
-          const seriesId = Number(j?.["seriesId"] ?? f.get("seriesId"));
-          const chapter = String(j?.["chapter"] ?? f.get("chapter") ?? "");
-          const page = Number(j?.["page"] ?? f.get("page") ?? 0);
-          const completed = String(j?.["completed"] ?? f.get("completed") ?? "false") === "true";
+          const { seriesId, chapter, page, completed } = await posted();
           if (!Number.isInteger(seriesId) || !chapter) return send(400, { error: "seriesId and chapter required" });
+          if (parts[1] === "upto") return send(200, { ok: true, marked: await setProgressUpTo(seriesId, chapter) });
+          if (parts[1] === "clear") { await clearProgress(seriesId, chapter); return send(200, { ok: true }); }
           await setProgress(seriesId, chapter, page, completed);
           return send(200, { ok: true });
         }
@@ -363,17 +361,7 @@ export async function serve(): Promise<void> {
         return html(import("./ui/pickcover.js").then((m) => m.pickCoverPage(Number(pick[1]))));
       }
       const cover = /^\/series\/(\d+)\/cover$/.exec(path);
-      if (cover) {
-        db().query<{ cover_path: string | null }>("SELECT cover_path FROM series WHERE id = $1", [Number(cover[1])])
-          .then((r) => {
-            const p2 = r.rows[0]?.cover_path;
-            if (!p2) { res.writeHead(404); res.end(); return; }
-            res.writeHead(200, { "content-type": sniffImage(p2), "cache-control": "public, max-age=3600" });
-            createReadStream(p2).on("error", () => { res.writeHead(404); res.end(); }).pipe(res);
-          })
-          .catch(() => { res.writeHead(500); res.end(); });
-        return;
-      }
+      if (cover) { serveCover(res, Number(cover[1])); return; }
       const rem = /^\/series\/(\d+)\/remove$/.exec(path);
       if (rem) return html(confirmRemovalPage(Number(rem[1])));
       const m = /^\/series\/(\d+)$/.exec(path);
@@ -391,12 +379,7 @@ export async function serve(): Promise<void> {
             sourceName: form.get("sourceName") ?? "", url: form.get("url") ?? "",
             ...(Number.isInteger(bindTo) && bindTo > 0 ? { seriesId: bindTo } : {}),
           });
-          // Queue what the source has and fetch the cover, but do not make the caller
-          // wait: adding from a search should be instant so several can be added in a row.
-          void scanWanted({ seriesId: id }).catch(() => undefined);
-          // Forced: a series that was imported from a folder already has a cover taken
-          // from a page, and the source's own artwork is the better answer.
-          void refreshMetadata(id, { force: true }).catch(() => undefined);
+          resyncAfterSwitch(id);
           return `/series/${id}`;
         }
         const scan = /^\/series\/(\d+)\/scan$/.exec(path);
@@ -416,17 +399,11 @@ export async function serve(): Promise<void> {
         if (promote) {
           const bid = Number(form.get("binding"));
           const sid = Number(promote[1]);
-          // One active source is a database constraint, so the incumbent steps down first.
+          // Already a binding on this series, so it steps up rather than being inserted.
+          // One active source is a unique index, so the incumbent steps down first.
           await db().query("UPDATE series_binding SET role='former' WHERE series_id=$1 AND role='active'", [sid]);
           await db().query("UPDATE series_binding SET role='active' WHERE id=$1 AND series_id=$2", [bid, sid]);
-          // A promotion with no scan behind it changes a row and nothing else: the whole
-          // point of switching source is what the new one carries, and until something
-          // scans, the queue still reflects the old one. Not awaited, so the page comes
-          // straight back rather than sitting on a live search.
-          void scanWanted({ seriesId: sid }).catch(() => undefined);
-          // A source has real cover art, which beats a page picked out of a chapter. All
-          // six series showing a credits page or a wall of panels had no source at all.
-          void refreshMetadata(sid, { force: true }).catch(() => undefined);
+          resyncAfterSwitch(sid);
           return `/series/${sid}`;
         }
         const meta = /^\/series\/(\d+)\/metadata$/.exec(path);

@@ -1,11 +1,9 @@
 import type { ServerResponse } from "node:http";
-import { gql } from "../suwayomi.js";
+import { gql, primeManga, SOURCE_SEARCH } from "../suwayomi.js";
 import { usableSources } from "../paid.js";
-import { preferWholeChapters, wholesCovered } from "../chapters.js";
+import { preferWholeChapters, compareOffering, heldFor } from "../chapters.js";
 
-const SEARCH = `mutation($src:LongString!,$q:String!){
-  fetchSourceManga(input:{source:$src,type:SEARCH,query:$q,page:1}){
-    mangas{ id title url thumbnailUrl } } }`;
+const SEARCH = SOURCE_SEARCH;
 
 /**
  * Streams search hits as each source answers.
@@ -75,27 +73,14 @@ async function against(seriesId: number, offeredAll: number[]): Promise<{
   newBeyond: number; fillsGaps: number; notCarried: number; held: number; heldMax: number | null;
 }> {
   const { db } = await import("../db.js");
-  const held = new Set((await db().query<{ n: string }>(
-    "SELECT chapter_number AS n FROM chapter WHERE series_id = $1", [seriesId])).rows.map((r) => Number(r.n)));
+  const held = await heldFor(seriesId);
   // Count only what would actually be fetched. A whole-only series showed "+11 fills" for
   // a source whose eleven were nine part-numbered chapters and two real ones, so the
   // column promised eleven chapters and the queue asked for two.
   const takesSplits = (await db().query<{ t: boolean }>(
     "SELECT take_splits AS t FROM series WHERE id = $1", [seriesId])).rows[0]?.t ?? false;
-  // What the downloader would take, not merely the whole numbers. Filtering every
-  // decimal here made a source offering 7.1 7.2 7.3 and no whole 7 read as covering
-  // nothing, so the migrate page argued against the source that was the only one with
-  // the chapter.
   const offered = takesSplits ? offeredAll : preferWholeChapters(offeredAll, held);
-  const heldMax = held.size > 0 ? Math.max(...held) : null;
-  const offeredSet = new Set(offered);
-  return {
-    newBeyond: heldMax === null ? offered.length : offered.filter((n) => n > heldMax).length,
-    fillsGaps: heldMax === null ? 0 : offered.filter((n) => n <= heldMax && !held.has(n)).length,
-    notCarried: [...held].filter((n) => !offeredSet.has(n)).length,
-    held: held.size,
-    heldMax,
-  };
+  return { ...compareOffering(offered, held), held: held.size };
 }
 
 export async function mangaDetail(mangaId: number, seriesId?: number): Promise<{
@@ -103,8 +88,7 @@ export async function mangaDetail(mangaId: number, seriesId?: number): Promise<{
   description: string | null; status: string; genres: string[]; lastUpload: string | null;
   newBeyond?: number; fillsGaps?: number; notCarried?: number; held?: number; heldMax?: number | null;
 }> {
-  await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
-    { id: mangaId }).catch(() => undefined);
+  await primeManga(mangaId);
   const d = await gql<{ manga: { description: string | null; status: string; genre: string[];
     chapters: { totalCount: number; nodes: Array<{ uploadDate: string | null; chapterNumber: number | null }> } } }>(
     `{ manga(id:${mangaId}) { description status genre chapters { totalCount nodes { uploadDate chapterNumber } } } }`);

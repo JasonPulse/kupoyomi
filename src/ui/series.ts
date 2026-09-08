@@ -110,7 +110,7 @@ export async function seriesPage(id: number, said?: string): Promise<string> {
        <div class="title">${esc(s.title)}${s.muted ? ' <span class="badge">muted</span>' : ""}${
          s.status === "COMPLETED" ? ' <span class="badge">finished</span>' : ""}${
          s.status && s.status !== "UNKNOWN" && s.status !== "COMPLETED" ? ` <span class="badge">${esc(s.status.toLowerCase())}</span>` : ""}</div>
-       <div class="meta">${chapters.length} chapters, ${fmt(held.at(-1) ?? null)}&ndash;${fmt(held[0] ?? null)}
+       <div class="meta">${chapters.length} chapters, ${fmt(held.at(-1) ?? null)} to ${fmt(held[0] ?? null)}
          &middot; folder <span class="dim">${esc(s.folder)}</span>${
          ""}</div>
        ${s.description ? `<div class="syn">${esc(s.description.slice(0, 1400))}</div>` : '<div class="syn dim">no synopsis yet</div>'}

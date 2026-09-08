@@ -1,3 +1,5 @@
+import { db } from "./db.js";
+
 /**
  * Every rule about whole chapters and part-numbered ones, in one place.
  *
@@ -104,3 +106,48 @@ export const supersededByParts = (n: number, heldAsParts: Set<number>): boolean 
  */
 export const IS_PART_SQL = "chapter_number <> trunc(chapter_number)";
 export const BASE_OF_SQL = "trunc(chapter_number)";
+
+/**
+ * What a source offers measured against what a series holds.
+ *
+ * Written four times over: the migrate page, the series page's per-binding row, the
+ * importer's stored comparison, and the CLI's compare. All four counted by exact number,
+ * so a source carrying chapter 7 as 7.1 7.2 7.3 reported chapter 7 as "not carried" while
+ * carrying it, and counted three fills for one chapter.
+ *
+ * Three separate facts, never one score. Chapters past your highest are the reason to
+ * move. Chapters inside your range that you lack are a bonus. Chapters you hold that the
+ * source lacks cost nothing, because the files stay on disk. Smearing them into a single
+ * number is what made the old library offer migrations that lost chapters.
+ */
+export type Comparison = {
+  newBeyond: number;
+  fillsGaps: number;
+  notCarried: number;
+  heldMax: number | null;
+};
+
+export const compareOffering = (offered: number[], held: Set<number>): Comparison => {
+  // Counted per chapter, not per file. Three parts of chapter 7 are one chapter gained.
+  const gives = wholesCovered(offered);
+  const has = wholesCovered(held);
+  const heldMax = has.size > 0 ? Math.max(...has) : null;
+  const chapters = [...gives];
+  return {
+    newBeyond: heldMax === null ? chapters.length : chapters.filter((n) => n > heldMax).length,
+    fillsGaps: heldMax === null ? 0 : chapters.filter((n) => n <= heldMax && !has.has(n)).length,
+    notCarried: [...has].filter((n) => !gives.has(n)).length,
+    heldMax,
+  };
+};
+
+/**
+ * The chapter numbers a series holds.
+ *
+ * Four modules ran this same SELECT to answer the same question, and the answer feeds
+ * every comparison, so they had four chances to disagree about it.
+ */
+export const heldFor = async (seriesId: number): Promise<Set<number>> =>
+  new Set((await db().query<{ n: string }>(
+    "SELECT chapter_number AS n FROM chapter WHERE series_id = $1", [seriesId],
+  )).rows.map((r) => Number(r.n)));

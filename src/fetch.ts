@@ -1,6 +1,6 @@
 import { mkdirSync, renameSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
-import { config } from "./config.js";
+import { config, suwayomiHttpBase } from "./config.js";
 import { db } from "./db.js";
 import { gql } from "./suwayomi.js";
 import { resolveManga } from "./match.js";
@@ -10,7 +10,6 @@ import { preferWholeChapters, wholesHeldAsParts, isPart, basesOf, supersededByPa
   IS_PART_SQL, BASE_OF_SQL } from "./chapters.js";
 
 /** Suwayomi's page proxy lives beside the graphql endpoint. */
-const httpBase = (): string => config.suwayomiUrl.replace(/\/api\/graphql\/?$/, "");
 
 type Binding = { id: number; series_id: number; source_id: string; source_name: string; source_url: string | null; title: string; folder: string; take_splits: boolean };
 
@@ -429,7 +428,7 @@ export async function fetchWanted(
           // could equally have been the sidecar wedged or out of disk.
           let res: Response;
           try {
-            res = await fetch(`${httpBase()}${rel}`, {
+            res = await fetch(`${suwayomiHttpBase()}${rel}`, {
               signal: AbortSignal.timeout(Number(process.env["PAGE_TIMEOUT_MS"] ?? 60_000)),
             });
           } catch (e) {

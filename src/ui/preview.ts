@@ -1,9 +1,9 @@
 import { db } from "../db.js";
-import { gql } from "../suwayomi.js";
+import { gql, primeManga } from "../suwayomi.js";
 import { resolveManga } from "../match.js";
 import { esc, page } from "./layout.js";
 import { fmt } from "../held.js";
-import { wholesCovered } from "../chapters.js";
+import { missingWholes } from "../chapters.js";
 
 /**
  * Looks at a series on a source without adding it.
@@ -23,8 +23,7 @@ export async function previewPage(sourceId: string, url: string, title: string):
          ${esc(err instanceof Error ? err.message : String(err))}</div></div>`);
   }
 
-  await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
-    { id: mangaId }).catch(() => undefined);
+  await primeManga(mangaId);
   const d = (await gql<{ manga: { title: string; description: string | null; status: string; genre: string[];
       source: { displayName: string } | null;
       chapters: { totalCount: number; nodes: Array<{ chapterNumber: number | null; name: string | null; scanlator: string | null; uploadDate: string | null }> } } }>(
@@ -32,9 +31,7 @@ export async function previewPage(sourceId: string, url: string, title: string):
          chapters { totalCount nodes { chapterNumber name scanlator uploadDate } } } }`)).manga;
 
   const nums = d.chapters.nodes.map((c) => c.chapterNumber).filter((n): n is number => n !== null);
-  const whole = wholesCovered(nums);
-  const gaps: number[] = [];
-  if (whole.size > 0) for (let i = Math.min(...whole); i <= Math.max(...whole); i++) if (!whole.has(i)) gaps.push(i);
+  const gaps = missingWholes(nums);
 
   // Already in the library? Then this is a candidate extra source, not a new series.
   const existing = (await db().query<{ id: number; title: string }>(
@@ -65,7 +62,7 @@ export async function previewPage(sourceId: string, url: string, title: string):
          <div style="min-width:0">
            <div class="title">${esc(d.title)}</div>
            <div class="meta">${esc(d.source?.displayName ?? "")} &middot; ${d.chapters.totalCount} chapters
-             ${nums.length ? `&middot; ${fmt(Math.min(...nums))}&ndash;${fmt(Math.max(...nums))}` : ""}
+             ${nums.length ? `&middot; ${fmt(Math.min(...nums))} to ${fmt(Math.max(...nums))}` : ""}
              ${gaps.length ? `&middot; <span class="warn">${gaps.length} gaps</span>` : "&middot; no gaps"}
              ${d.status && d.status !== "UNKNOWN" ? `&middot; ${esc(d.status.toLowerCase())}` : ""}</div>
            ${d.genre?.length ? `<div class="meta">${esc(d.genre.slice(0, 8).join(", "))}</div>` : ""}

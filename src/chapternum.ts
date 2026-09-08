@@ -1,7 +1,7 @@
 /**
  * Recovers a chapter number from a Suwayomi-era filename.
  *
- * Needed only where there is no snapshot row to map files to numbers -- manual
+ * Needed only where there is no snapshot row to map files to numbers. Manual
  * downloads, and series whose Suwayomi record never existed. Everywhere else the
  * snapshot is authoritative and this is not used, because filenames are a worse
  * source of truth than a database.

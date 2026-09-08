@@ -300,9 +300,12 @@ test("no module reimplements the whole-versus-part rule", async () => {
       const asCallback = /\(Number\.isInteger\)/.test(line);
       const decidesPartness = asCallback
         || /chapter|\bnums?\b|held|offered|part|\bn\b|\bm\b/i.test(arg);
-      // Mapping a part onto its chapter, in either language.
+      // Mapping a part onto its chapter, in either language. The SQL form takes a table
+      // alias, and matching only the bare column let adopt.ts keep two aliased copies
+      // through the first sweep: trunc(c.chapter_number) is the same rule.
       const mapsPartToBase = /Math\.trunc/.test(line)
-        || (/trunc\(chapter_number\)/.test(line) && !/IS_PART_SQL|BASE_OF_SQL/.test(line));
+        || (/trunc\(\s*(?:[A-Za-z_][A-Za-z0-9_]*\.)?chapter_number\s*\)/.test(line)
+            && !/IS_PART_SQL|BASE_OF_SQL|isPartSql|baseOfSql/.test(line));
       if (decidesPartness || mapsPartToBase) offenders.push(`${file}:${i + 1} ${line.trim().slice(0, 74)}`);
     }
   }
@@ -386,4 +389,43 @@ test("the suwayomi http base is derived in one place", async () => {
   const { suwayomiHttpBase } = await import("../src/config.js");
   assert.ok(!suwayomiHttpBase().endsWith("/api/graphql"), "the graphql suffix is stripped");
   assert.ok(suwayomiHttpBase().startsWith("http"), "and it is still a url");
+});
+
+/**
+ * Guards against the shapes that were each written out three or more times.
+ *
+ * Every entry here was a real duplicate found by reading the tree, and each one had
+ * drifted from its siblings by the time it was found. The test names the file and line so
+ * the next copy is caught where it is written rather than after it causes a bug.
+ */
+test("no module rewrites a rule that has a shared implementation", async () => {
+  const { readdirSync, readFileSync, statSync } = await import("node:fs");
+  const walk = (dir: string): string[] => readdirSync(dir).flatMap((f) => {
+    const full = `${dir}/${f}`;
+    return statSync(full).isDirectory() ? walk(full) : full.endsWith(".ts") ? [full] : [];
+  });
+
+  // Each rule names the shape to catch and the file allowed to contain it.
+  const rules: Array<{ what: string; re: RegExp; home: string }> = [
+    { what: "the source search mutation", re: /fetchSourceManga\(input:\{source:\$src,type:SEARCH/, home: "src/suwayomi.ts" },
+    { what: "the manga priming mutation", re: /fetchMangaAndChapters\(input:/, home: "src/suwayomi.ts" },
+    { what: "the extension install mutation", re: /updateExtension\(input:/, home: "src/extensions.ts" },
+    { what: "suwayomi's http base", re: /replace\(\/\\\/api\\\/graphql/, home: "src/config.ts" },
+    { what: "the attempt limit", re: /FETCH_MAX_ATTEMPTS/, home: "src/config.ts" },
+    { what: "the held-chapters query", re: /chapter_number(?: AS n)? FROM chapter WHERE series_id = \$1"/, home: "src/chapters.ts" },
+    { what: "activating a binding", re: /role = 'active'\n/, home: "src/sources.ts" },
+  ];
+
+  const offenders: string[] = [];
+  for (const file of walk("src")) {
+    const text = readFileSync(file, "utf8");
+    for (const r of rules) {
+      if (file.endsWith(r.home)) continue;
+      for (const [i, line] of text.split("\n").entries()) {
+        if (line.trimStart().startsWith("//") || line.trimStart().startsWith("*")) continue;
+        if (r.re.test(line)) offenders.push(`${file}:${i + 1} rewrites ${r.what}, which lives in ${r.home}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `\n  ${offenders.join("\n  ")}`);
 });

@@ -1,13 +1,13 @@
 import { mkdirSync, renameSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
-import { config, suwayomiHttpBase } from "./config.js";
+import { config, suwayomiHttpBase, maxAttempts } from "./config.js";
 import { db } from "./db.js";
-import { gql } from "./suwayomi.js";
+import { gql, primeManga } from "./suwayomi.js";
 import { resolveManga } from "./match.js";
 import { buildCbz, comicInfo } from "./cbz.js";
-import { chapterFilename } from "./remap.js";
+import { libraryPathFor } from "./remap.js";
 import { preferWholeChapters, wholesHeldAsParts, isPart, basesOf, supersededByParts,
-  IS_PART_SQL, BASE_OF_SQL } from "./chapters.js";
+  heldFor, IS_PART_SQL, BASE_OF_SQL } from "./chapters.js";
 
 /** Suwayomi's page proxy lives beside the graphql endpoint. */
 
@@ -60,8 +60,7 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
     try {
       if (!b.source_url) continue;
       mangaId = await resolveManga(b.source_id, b.title, b.source_url);
-      await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
-        { id: mangaId });
+      await primeManga(mangaId);
     } catch (err) {
       console.log(`  ${b.title.slice(0, 40)}: ${err instanceof Error ? err.message.slice(0, 80) : String(err)}`);
       continue;
@@ -70,10 +69,8 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
       `{ manga(id:${mangaId}) { chapters { nodes { chapterNumber } } } }`)).manga.chapters.nodes
       .map((c) => c.chapterNumber).filter((n): n is number => n !== null);
     const { kept: offeredAll, dropped } = withoutOutliers(offered);
-    const heldNums = (await p.query<{ chapter_number: string }>(
-      "SELECT chapter_number FROM chapter WHERE series_id = $1", [b.series_id])).rows
-      .map((r) => Number(r.chapter_number));
-    const held = new Set(heldNums);
+    const held = await heldFor(b.series_id);
+    const heldNums = [...held];
     const heldAsParts = wholesHeldAsParts(heldNums);
 
     const wholeOnly = (process.env["FETCH_WHOLE_ONLY"] ?? "true") !== "false" && !b.take_splits;
@@ -178,7 +175,7 @@ export async function nextWanted(
       [only.seriesId, only.chapter])).rows;
   }
   const block = Math.max(1, Number(blockSize ?? process.env["FETCH_BLOCK"] ?? 25));
-  const maxAttempts = Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6));
+  const attemptLimit = maxAttempts();
   const deadAfter = Math.max(1, Number(deadAfterHours ?? 48));
   // Round-robin by block, not one series start to finish.
   //
@@ -218,7 +215,7 @@ export async function nextWanted(
           -- brings them back for one more try instead. Deliberately not a reset of
           -- attempts: the count is what the source health metric is measured from, and
           -- zeroing it would quietly forgive the record it is meant to keep.
-          AND (w.attempts < ${maxAttempts}
+          AND (w.attempts < ${attemptLimit}
                OR COALESCE(w.started_at, w.queued_at) < now() - interval '${deadAfter} hours')
           -- A row waiting out its backoff is not a candidate yet.
           AND (w.retry_after IS NULL OR w.retry_after <= now())
@@ -305,7 +302,7 @@ export async function reclaimStuck(olderThanMinutes = 0): Promise<number> {
  * This is that way back, for one series or the whole library.
  */
 export async function retryFailed(seriesId?: number, chapter?: string): Promise<number> {
-  const max = Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6));
+  const max = maxAttempts();
   // One named chapter is a deliberate "try this now", so it ignores both the attempt limit
   // and the remaining backoff. Waiting six hours is the right default and the wrong answer
   // to somebody standing there having just fixed the source.
@@ -400,8 +397,7 @@ export async function fetchWanted(
         if (mangaId === undefined) {
           if (!it.source_url) throw new Error("binding has no source url");
           mangaId = await resolveManga(it.source_id, it.title, it.source_url);
-          await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
-            { id: mangaId }).catch(() => undefined);
+          await primeManga(mangaId);
           resolved.set(it.binding_id, mangaId);
         }
         const want = Number(it.chapter_number);
@@ -458,7 +454,7 @@ export async function fetchWanted(
           ...images,
         ], uploaded ?? new Date(0));
 
-        const dest = `${config.libraryRoot}/${it.folder}/${chapterFilename(it.title, it.chapter_number, ch.scanlator)}`;
+        const dest = libraryPathFor(it.title, it.folder, it.chapter_number, ch.scanlator);
         mkdirSync(dirname(dest), { recursive: true });
         // Written to a temporary name and renamed, so a page failing part-way through
         // can never leave a truncated archive that later looks complete.
@@ -558,7 +554,7 @@ export async function fetchWanted(
     `UPDATE series SET served = 0 WHERE served > 0 AND NOT EXISTS (
        SELECT 1 FROM wanted w WHERE w.series_id = series.id
          AND w.state IN ('pending','failed','fetching')
-         AND w.attempts < ${Math.max(1, Number(process.env["FETCH_MAX_ATTEMPTS"] ?? 6))})`);
+         AND w.attempts < ${maxAttempts()})`);
   console.log(`\ndownloaded ${done}, failed ${failed}, ${(bytes / 1048576).toFixed(0)}MB` +
     (skipped > 0 ? `, ${skipped} left for the next run behind a series that kept failing` : "") +
     ((reset.rowCount ?? 0) > 0 ? `, ${reset.rowCount} finished their backlog and rejoin at the front` : ""));

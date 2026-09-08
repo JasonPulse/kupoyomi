@@ -4,7 +4,7 @@ import type { Candidate } from "./match.js";
 
 /**
  * Records the stable source url for candidates that were staged before bindings
- * keyed on it. Run against the Suwayomi that produced the ids -- 25 lookups rather
+ * keyed on it. Run against the Suwayomi that produced the ids. 25 lookups rather
  * than re-searching 20 sources for 24 series.
  */
 export async function backfillUrls(): Promise<void> {

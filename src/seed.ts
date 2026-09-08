@@ -1,7 +1,7 @@
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { scanLegacyTree } from "./disk.js";
-import { sanitize } from "./suwayomi.js";
+import { sanitize, legacyChapterFile } from "./suwayomi.js";
 
 /**
  * Canonical folder and file names. Suwayomi flattens every illegal character to '_',
@@ -19,11 +19,7 @@ export const canonical = (title: string): string =>
 type LegacyManga = { suwayomi_id: number; title: string; source_name: string | null; status: string | null; in_library: boolean };
 type LegacyChapter = { chapter_number: string | null; name: string | null; page_count: number | null; scanlator: string | null; uploaded_at: Date | null };
 
-/** Suwayomi's on-disk name for a chapter: "{scanlator}_{name}.cbz", or "{name}.cbz". */
-const legacyBasename = (ch: LegacyChapter): string => {
-  const base = ch.scanlator ? `${sanitize(ch.scanlator)}_${sanitize(ch.name ?? "")}` : sanitize(ch.name ?? "");
-  return `${base}.cbz`;
-};
+const legacyBasename = (ch: LegacyChapter): string => legacyChapterFile(ch.name, ch.scanlator);
 
 /**
  * One file per chapter number, per the ledger's primary key. Which scanlation wins

@@ -66,6 +66,15 @@ export const libraryWithChapters = async (): Promise<Array<Manga & { chapters: {
  */
 export const sanitize = (s: string): string => s.replace(/[\\/:*?"<>|]/g, "_").trim();
 
+/**
+ * Suwayomi's own on-disk name for a chapter: "{scanlator}_{name}.cbz", or "{name}.cbz".
+ *
+ * Written in held.ts to match files against snapshot rows, and again in seed.ts to do the
+ * same job. Both had to agree exactly or a chapter's metadata attached to the wrong file.
+ */
+export const legacyChapterFile = (name: string | null, scanlator: string | null): string =>
+  `${scanlator ? `${sanitize(scanlator)}_${sanitize(name ?? "")}` : sanitize(name ?? "")}.cbz`;
+
 export type Extension = { pkgName: string; repo: string | null; versionName: string };
 
 export const installedExtensions = async (): Promise<Extension[]> =>
@@ -112,12 +121,6 @@ export const mangaChapters = async (id: number): Promise<Chapter[]> =>
   (await gql<{ manga: { chapters: { nodes: Chapter[] } } }>(
     `{ manga(id:${id}) { chapters { nodes { name pageCount chapterNumber isDownloaded scanlator uploadDate } } } }`,
   )).manga.chapters.nodes;
-
-/** Installs an extension by package name. This is what replaces logging into the UI. */
-export const installExtension = async (pkgName: string): Promise<void> => {
-  await gql(`mutation($pkg:String!){ updateExtension(input:{id:$pkg,patch:{install:true}}){ clientMutationId } }`,
-    { pkg: pkgName });
-};
 
 export const serverAbout = async (): Promise<{ version: string; revision: string }> =>
   (await gql<{ aboutServer: { version: string; revision: string } }>(

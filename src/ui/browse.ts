@@ -1,7 +1,7 @@
 import type { ServerResponse } from "node:http";
 import { gql } from "../suwayomi.js";
 import { usableSources } from "../paid.js";
-import { esc, page } from "./layout.js";
+import { esc, page, ADD_FORM_JS } from "./layout.js";
 
 const FILTERS = `query($id:LongString!){ source(id:$id){
   id displayName lang isNsfw supportsLatest
@@ -122,20 +122,6 @@ function detail(id, card) {
     }
   })();
 }
-document.addEventListener('submit', ev => {
-  const f = ev.target;
-  if (!f.classList || !f.classList.contains('addf')) return;
-  ev.preventDefault();
-  const b = f.querySelector('button');
-  b.disabled = true; b.textContent = 'adding';
-  fetch('/add', { method: 'POST', body: new URLSearchParams(new FormData(f)) })
-    .then(r => {
-      const id = (r.url.split('/series/')[1] || '').split(/[^0-9]/)[0];
-      f.outerHTML = id ? '<a class="series" href="/series/'+id+'">added &rarr;</a>' : '<span class="bad">failed</span>';
-    })
-    .catch(() => { b.disabled = false; b.textContent = 'retry'; });
-});
-
 const es = new EventSource(url);
 let n = 0, finished = false;
 status.textContent = 'contacting the source';
@@ -230,6 +216,7 @@ export async function browseSource(sourceId: string, type: string, filters: stri
        <div class="dim" id="status" style="margin-bottom:12px">loading</div>
        <div class="grid2" id="results"></div>
      </div>
+     <script>${ADD_FORM_JS}</script>
      <script>${CLIENT}</script>`);
 }
 

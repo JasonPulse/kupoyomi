@@ -1,5 +1,6 @@
 import { db } from "./db.js";
-import { gql, installedExtensions, installExtension, sanitize } from "./suwayomi.js";
+import { gql, installedExtensions, sanitize, SOURCE_SEARCH } from "./suwayomi.js";
+import { setExtension, setDesired, setInstalled } from "./extensions.js";
 import type { Candidate } from "./match.js";
 
 type SourceWithExt = { id: string; displayName: string; lang: string; isNsfw: boolean; extension: { pkgName: string } | null };
@@ -8,13 +9,7 @@ const sourcesWithExtension = async (): Promise<SourceWithExt[]> =>
   (await gql<{ sources: { nodes: SourceWithExt[] } }>(
     `{ sources { nodes { id displayName lang isNsfw extension { pkgName } } } }`)).sources.nodes;
 
-const SEARCH = `mutation($src:LongString!,$q:String!){
-  fetchSourceManga(input:{source:$src,type:SEARCH,query:$q,page:1}){ mangas{ id title url } } }`;
-
-const uninstall = async (pkgName: string): Promise<void> => {
-  await gql(`mutation($pkg:String!){ updateExtension(input:{id:$pkg,patch:{uninstall:true}}){ clientMutationId } }`,
-    { pkg: pkgName });
-};
+const SEARCH = SOURCE_SEARCH;
 
 type Target = { id: number; folder: string; title: string; candidates: Candidate[] };
 
@@ -53,7 +48,7 @@ export async function probe(opts: { batch?: number; max?: number; includeNsfw?: 
     const batch = pool.slice(i, i + batchSize);
     const ok: string[] = [];
     for (const e of batch) {
-      try { await installExtension(e.pkgName); ok.push(e.pkgName); }
+      try { await setInstalled(e.pkgName, true); ok.push(e.pkgName); }
       catch (err) {
         await p.query("INSERT INTO probe_attempt (pkg_name, error) VALUES ($1,$2) ON CONFLICT (pkg_name) DO NOTHING",
           [e.pkgName, err instanceof Error ? err.message.slice(0, 200) : String(err)]);
@@ -96,10 +91,8 @@ export async function probe(opts: { batch?: number; max?: number; includeNsfw?: 
     for (const pkg of ok) {
       const hits = hitsPerPkg.get(pkg) ?? 0;
       const keep = hits > 0;
-      if (!keep) { try { await uninstall(pkg); } catch { /* leaving it installed is harmless */ } }
-      else await p.query(
-        `INSERT INTO extension (pkg_name, desired) VALUES ($1,true)
-         ON CONFLICT (pkg_name) DO UPDATE SET desired = true`, [pkg]);
+      if (!keep) { try { await setExtension(pkg, false); } catch { /* leaving it installed is harmless */ } }
+      else await setDesired(pkg, true);
       await p.query(
         `INSERT INTO probe_attempt (pkg_name, sources, hits, kept) VALUES ($1,$2,$3,$4)
          ON CONFLICT (pkg_name) DO UPDATE SET sources=$2, hits=$3, kept=$4, probed_at=now()`,
@@ -148,11 +141,10 @@ export async function tidyExtensions(opts: { dryRun?: boolean } = {}): Promise<v
 
   for (const r of drop) {
     try {
-      await gql(`mutation($pkg:String!){ updateExtension(input:{id:$pkg,patch:{uninstall:true}}){ clientMutationId } }`,
-        { pkg: r.pkg_name });
+      await setInstalled(r.pkg_name, false);
     } catch { /* already gone is fine */ }
     await p.query("UPDATE probe_attempt SET kept = false WHERE pkg_name = $1", [r.pkg_name]);
-    await p.query("UPDATE extension SET desired = false WHERE pkg_name = $1", [r.pkg_name]);
+    await setDesired(r.pkg_name, false);
   }
   const after = await sourcesWithExtension();
   console.log(`uninstalled ${drop.length}; sources now ${after.length}`);

@@ -3,7 +3,7 @@ import { config } from "./config.js";
 import { db } from "./db.js";
 import { scanLegacyTree } from "./disk.js";
 import { parseChapterNumber } from "./chapternum.js";
-import { sanitize } from "./suwayomi.js";
+import { legacyChapterFile } from "./suwayomi.js";
 
 export type Held = { file: string; scanlator: string | null; pageCount: number | null; uploadedAt: Date | null };
 
@@ -21,8 +21,8 @@ export async function heldChapters(
   const entry = (await scanLegacyTree()).find((d) => d.sourceDir === deadSource && d.folder === folder);
 
   // The filesystem decides what we hold. Suwayomi's isDownloaded flag has been wrong
-  // in both directions on this library -- 157 chapters flagged that had no file, and
-  // 43 files it did not know it had -- so it cannot gate this.
+  // in both directions on this library. 157 chapters flagged that had no file, and
+  // 43 files it did not know it had. So it cannot gate this.
   const out = new Map<number, Held>();
   const sizes = new Map<number, number>();
   const fileFor = new Map<string, number>();
@@ -46,8 +46,7 @@ export async function heldChapters(
       `SELECT chapter_number, name, scanlator, page_count, uploaded_at FROM legacy_chapter
         WHERE suwayomi_manga_id = $1 AND chapter_number IS NOT NULL`, [suwayomiMangaId])).rows;
     for (const r of rows) {
-      const base = r.scanlator ? `${sanitize(r.scanlator)}_${sanitize(r.name ?? "")}` : sanitize(r.name ?? "");
-      const file = `${base}.cbz`;
+      const file = legacyChapterFile(r.name, r.scanlator);
       const held = out.get(Number(r.chapter_number));
       if (held && held.file === file) {
         held.scanlator = r.scanlator;

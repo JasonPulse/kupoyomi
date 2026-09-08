@@ -50,7 +50,7 @@ export function looksLikeSiteCopy(text: string): boolean {
 /**
  * Cover and synopsis taken from the files themselves, needing no source at all.
  *
- * An archived series has no binding by design -- there will never be another chapter, so
+ * An archived series has no binding by design. There will never be another chapter, so
  * there is nothing for a binding to receive. That left it permanently without cover art,
  * because every route to a cover went through a source. The first page of the earliest
  * chapter is a cover: it is what the scanlator put there, and it is on disk already.

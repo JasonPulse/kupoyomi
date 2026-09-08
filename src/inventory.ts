@@ -1,6 +1,6 @@
 import { scanLegacyTree, type DiskSeries } from "./disk.js";
 import { installedSources, libraryWithChapters, allManga, type Chapter } from "./suwayomi.js";
-import { wholesCovered } from "./chapters.js";
+import { wholesCovered, missingWholes } from "./chapters.js";
 
 /** Loose key used only to group folders that are obviously the same series. */
 export const normalize = (s: string): string =>
@@ -82,9 +82,7 @@ export async function buildInventory(): Promise<Inventory> {
     const have = wholeNumbers(m.chapters.nodes, true);
     const listed = wholeNumbers(m.chapters.nodes, false);
     if (have.size < 3) continue;
-    const lo = Math.min(...have), hi = Math.max(...have);
-    const missing: number[] = [];
-    for (let i = lo; i <= hi; i++) if (!have.has(i)) missing.push(i);
+    const missing = missingWholes(have);
     if (missing.length === 0) continue;
     // A gap the bound source still lists is a failed download, not a migration.
     const r = missing.filter((n) => listed.has(n));

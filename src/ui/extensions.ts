@@ -60,15 +60,4 @@ export async function extensionsPage(opts: { q?: string; lang?: string; nsfw?: b
      </table>${shown.length > 400 ? `<div class="dim" style="margin-top:8px">showing 400 of ${shown.length}</div>` : ""}</div>`);
 }
 
-/** Installed extensions are recorded as declared, so a cold Suwayomi gets them back. */
-export async function setExtension(pkg: string, install: boolean): Promise<void> {
-  await gql(`mutation($pkg:String!){ updateExtension(input:{id:$pkg,patch:{${install ? "install" : "uninstall"}:true}}){ clientMutationId } }`,
-    { pkg });
-  if (install) {
-    await db().query(
-      `INSERT INTO extension (pkg_name, desired) VALUES ($1,true)
-       ON CONFLICT (pkg_name) DO UPDATE SET desired = true`, [pkg]);
-  } else {
-    await db().query("UPDATE extension SET desired = false WHERE pkg_name = $1", [pkg]);
-  }
-}
+export { setExtension } from "../extensions.js";

@@ -93,7 +93,7 @@ export async function findHomes(opts: { only?: string; limit?: number; includeNs
 /**
  * Chapter count, gaps and the last few uploads per candidate: the migration
  * comparison view. A search result has a manga row but no chapter list, so this
- * primes it from the source first -- comparing candidates means asking the sources,
+ * primes it from the source first. Comparing candidates means asking the sources,
  * there is no way around the round trip.
  */
 export async function compare(mangaId: number) {
@@ -127,7 +127,7 @@ export async function compare(mangaId: number) {
  * Sites index titles with straight punctuation, so a stored title carrying a curly
  * apostrophe finds nothing: "I’m being raised by villains" returned 0 results where
  * "I'm being raised by villains" returned the right entry. Being liberal with the query
- * is safe because the match is on url, which is exact -- a wider search cannot produce
+ * is safe because the match is on url, which is exact. A wider search cannot produce
  * a wrong answer, only a slower one.
  */
 export function queryVariants(title: string): string[] {

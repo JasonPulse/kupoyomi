@@ -3,13 +3,13 @@ import { config } from "./config.js";
 import { db } from "./db.js";
 import { heldChapters } from "./held.js";
 import { canonical } from "./seed.js";
-import { chapterFilename } from "./remap.js";
+import { adoptFile } from "./remap.js";
 
 /**
  * Files a finished series: adopts everything on disk into the canonical tree, gives it
  * no source binding, and takes it out of the review queue for good.
  *
- * A completed series has no useful migration target -- the point of a binding is to
+ * A completed series has no useful migration target. The point of a binding is to
  * receive new chapters, and there will not be any. Previously this state was
  * unrepresentable, so a series you had finished reading kept offering migrations that
  * would only ever lose you chapters.
@@ -42,17 +42,13 @@ export async function archiveCandidate(candidateId: number, opts: { dryRun?: boo
       [title, folder]);
     const seriesId = s.rows[0]!.id;
 
-    mkdirSync(targetDir, { recursive: true });
     for (const [num, h] of [...held.entries()].sort((a, b) => a[0] - b[0])) {
       const src = `${config.legacyRoot}/${cand.dead_source}/${cand.folder}/${h.file}`;
       if (!existsSync(src)) continue;
-      const dest = `${targetDir}/${chapterFilename(title, String(num), h.scanlator)}`;
-      if (!existsSync(dest)) linkSync(src, dest);
-      const r = await client.query(
-        `INSERT INTO chapter (series_id, chapter_number, file_path, page_count, scanlator, uploaded_at)
-         VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (series_id, chapter_number) DO NOTHING`,
-        [seriesId, num, dest, h.pageCount, h.scanlator, h.uploadedAt]);
-      if (r.rowCount ?? 0 > 0) adopted++;
+      if (await adoptFile(seriesId, title, folder, {
+        number: String(num), src, scanlator: h.scanlator,
+        pageCount: h.pageCount, uploadedAt: h.uploadedAt,
+      })) adopted++;
     }
     await client.query(
       "UPDATE import_candidate SET confirmed_series_id = $1, resolution = 'archived' WHERE id = $2",

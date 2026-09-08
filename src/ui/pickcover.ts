@@ -1,6 +1,7 @@
 import { esc, page } from "./layout.js";
 import { coverCandidates } from "../metadata.js";
 import { db } from "../db.js";
+import { fmt } from "../held.js";
 
 /**
  * A page of thumbnails to choose a cover from.
@@ -15,7 +16,7 @@ export async function pickCoverPage(seriesId: number): Promise<string> {
   if (!s) return page("library", "not found", '<div class="card">no such series</div>');
   const chapters = await coverCandidates(seriesId);
 
-  const grid = chapters.map((c) => `<div class="title" style="margin-top:8px">chapter ${esc(c.chapter.replace(/\.?0+$/, "") || c.chapter)}</div>
+  const grid = chapters.map((c) => `<div class="title" style="margin-top:8px">chapter ${esc(fmt(c.chapter))}</div>
     <div class="pg">${Array.from({ length: c.pages }, (_, i) => `
       <form method="post" action="/series/${seriesId}/cover">
         <input type="hidden" name="chapter" value="${esc(c.chapter)}">

@@ -1,7 +1,8 @@
 import { linkSync, mkdirSync, existsSync } from "node:fs";
 import { config } from "./config.js";
 import { db } from "./db.js";
-import { chapterFilename } from "./remap.js";
+import { libraryPathFor } from "./remap.js";
+import { dirname } from "node:path";
 
 /**
  * Moves any chapter still living in the legacy per-source tree into the canonical
@@ -23,10 +24,12 @@ export async function relayout(opts: { seriesId?: number; dryRun?: boolean } = {
   const touched = new Set<number>();
   for (const r of rows) {
     if (!existsSync(r.file_path)) { gone++; continue; }
-    const dest = `${config.libraryRoot}/${r.folder}/${chapterFilename(r.title, r.chapter_number, r.scanlator)}`;
+    const dest = libraryPathFor(r.title, r.folder, r.chapter_number, r.scanlator);
     if (opts.dryRun) { moved++; touched.add(r.series_id); continue; }
-    mkdirSync(`${config.libraryRoot}/${r.folder}`, { recursive: true });
+    mkdirSync(dirname(dest), { recursive: true });
     if (!existsSync(dest)) linkSync(r.file_path, dest);
+    // Already in the ledger, so this points the existing row at its new home rather
+    // than inserting one.
     await p.query("UPDATE chapter SET file_path = $1 WHERE series_id = $2 AND chapter_number = $3",
       [dest, r.series_id, r.chapter_number]);
     moved++; touched.add(r.series_id);

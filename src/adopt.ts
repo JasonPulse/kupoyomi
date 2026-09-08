@@ -4,8 +4,8 @@ import { config } from "./config.js";
 import { db } from "./db.js";
 import { scanLegacyTree } from "./disk.js";
 import { parseChapterNumber } from "./chapternum.js";
-import { chapterFilename } from "./remap.js";
-import { supersededByWhole, IS_PART_SQL } from "./chapters.js";
+import { adoptFile } from "./remap.js";
+import { supersededByWhole, heldFor, IS_PART_SQL, isPartSql, baseOfSql } from "./chapters.js";
 
 /**
  * Adopts chapters already on disk into a series, from every folder that holds them.
@@ -88,8 +88,7 @@ export async function findOnDisk(seriesId: number, opts: { propose?: boolean } =
   const s = (await p.query<{ title: string; folder: string }>(
     "SELECT title, folder FROM series WHERE id = $1", [seriesId])).rows[0];
   if (!s) throw new Error(`no series ${seriesId}`);
-  const held = new Set((await p.query<{ n: string }>(
-    "SELECT chapter_number AS n FROM chapter WHERE series_id = $1", [seriesId])).rows.map((r) => Number(r.n)));
+  const held = await heldFor(seriesId);
   const takesSplits = (await p.query<{ t: boolean }>(
     "SELECT take_splits AS t FROM series WHERE id = $1", [seriesId])).rows[0]?.t ?? false;
   const decided = new Map((await p.query<{ path: string; state: string }>(
@@ -181,15 +180,11 @@ export async function adoptFromDisk(seriesId: number, opts: { dryRun?: boolean; 
     // A proposal is never acted on. Link it first, deliberately.
     if (opts.dryRun || !src.linked) { fresh.forEach(([n]) => claimed.add(n)); continue; }
     for (const [n, file] of fresh) {
-      const dest = `${targetDir}/${chapterFilename(title, String(n), null)}`;
       try {
-        mkdirSync(dirname(dest), { recursive: true });
-        if (!existsSync(dest)) linkSync(`${src.path}/${file}`, dest);
-        const r = await p.query(
-          `INSERT INTO chapter (series_id, chapter_number, file_path, scanlator)
-           VALUES ($1,$2,$3,NULL) ON CONFLICT (series_id, chapter_number) DO NOTHING`,
-          [seriesId, n, dest]);
-        if (r.rowCount ?? 0 > 0) { adopted++; claimed.add(n); }
+        const got = await adoptFile(seriesId, title, series.folder, {
+          number: String(n), src: `${src.path}/${file}`, scanlator: null,
+        });
+        if (got) { adopted++; claimed.add(n); }
       } catch (err) {
         console.log(`    could not adopt ${n}: ${err instanceof Error ? err.message.slice(0, 70) : String(err)}`);
       }
@@ -240,7 +235,7 @@ export async function diskReport(): Promise<void> {
     const guesses = series.filter((s) => looksLikeSame(s.title, d.folder, s.aliases ?? []));
     rows.push(`  ${String(d.cbzCount).padStart(4)} files  ${d.sourceDir ? "" : "(no source dir) "}${d.folder.slice(0, 62)}`
       + (guesses.length ? `\n           looks like: ${guesses.map((g) => `${g.id} ${g.title.slice(0, 44)}`).join("; ")}`
-                        : `\n           no series matches by name -- link it by hand if you know which it is`));
+                        : `\n           no series matches by name. Link it by hand if you know which it is`));
   }
   console.log(`${tree.length} folders on disk: ${linked} linked, ${ignored} ignored, ${loose} undecided, `
     + `${empty} holding no archives (source directories and caches)`);
@@ -302,8 +297,7 @@ export async function redundantFolders(): Promise<Array<{
   const out: Array<{ seriesId: number; title: string; path: string; files: number;
     bytes: number; reclaimable: number; linkedCopies: number; heldAll: boolean }> = [];
   for (const l of links) {
-    const held = new Set((await p.query<{ n: string }>(
-      "SELECT chapter_number AS n FROM chapter WHERE series_id = $1", [l.series_id])).rows.map((r) => Number(r.n)));
+    const held = await heldFor(l.series_id);
     let files = 0, bytes = 0, reclaimable = 0, linkedCopies = 0, missing = 0;
     let names: string[];
     try { names = readdirSync(l.path); } catch { continue; }
@@ -402,7 +396,7 @@ export async function linkObvious(opts: { dryRun?: boolean } = {}): Promise<void
     if (hits.length > 1) {
       ambiguous++;
       console.log(`  ambiguous ${u.folder.slice(0, 54)}`);
-      console.log(`            matches ${hits.map((h) => `${h.id} ${h.title.slice(0, 30)}`).join(", ")} -- left alone`);
+      console.log(`            matches ${hits.map((h) => `${h.id} ${h.title.slice(0, 30)}`).join(", ")}. Left alone`);
       continue;
     }
     const s = hits[0]!;
@@ -465,9 +459,9 @@ export async function pruneSplitChapters(opts: { delete?: boolean } = {}): Promi
   const rows = (await p.query<{ series_id: number; title: string; chapter_number: string; file_path: string; whole_held: boolean }>(
     `SELECT c.series_id, s.title, c.chapter_number::text, c.file_path,
             EXISTS (SELECT 1 FROM chapter c2 WHERE c2.series_id = c.series_id
-                     AND c2.chapter_number = trunc(c.chapter_number)) AS whole_held
+                     AND c2.chapter_number = ${baseOfSql("c")}) AS whole_held
        FROM chapter c JOIN series s ON s.id = c.series_id
-      WHERE c.chapter_number <> trunc(c.chapter_number)
+      WHERE ${isPartSql("c")}
       ORDER BY s.title, c.chapter_number`)).rows;
 
   const redundant = rows.filter((r) => r.whole_held);

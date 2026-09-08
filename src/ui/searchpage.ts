@@ -1,6 +1,6 @@
 import { db } from "../db.js";
 import { healthMap } from "../health.js";
-import { esc, page } from "./layout.js";
+import { esc, page, ADD_FORM_JS } from "./layout.js";
 
 const CLIENT = String.raw`
 const q = new URLSearchParams(location.search).get('q') || '';
@@ -215,25 +215,6 @@ function pump() {
   }
 }
 
-// Adding must not navigate: batch-adding several results from one search is the point.
-document.addEventListener('submit', ev => {
-  const f = ev.target;
-  if (!f.classList || !f.classList.contains('addf')) return;
-  ev.preventDefault();
-  const b = f.querySelector('button');
-  const attaching = !!f.querySelector('input[name=seriesId]');
-  b.disabled = true; b.textContent = attaching ? 'attaching' : 'adding';
-  fetch('/add', { method: 'POST', body: new URLSearchParams(new FormData(f)) })
-    .then(r => {
-      const id = (r.url.split('/series/')[1] || '').split(/[^0-9]/)[0];
-      f.outerHTML = id
-        ? '<span class="rec">'+(attaching ? 'attached' : 'added')+
-          '</span> <a class="series" href="/series/'+id+'">open</a>'
-        : '<span class="bad">failed</span>';
-    })
-    .catch(() => { b.disabled = false; b.textContent = 'retry'; });
-});
-
 // One site listed the same work as 'TS Villainess RTA' and 'TS Villianess RTA'. A
 // transposed letter is a typo, not a different series, so keys within a couple of edits
 // of an existing one are folded in. Only for long keys: on a short key two edits is a
@@ -414,5 +395,6 @@ export async function searchPage(query?: string, seriesId?: number): Promise<str
   return page("search", target ? `choosing a source for ${target.title}` : "global search",
     `<style>${EXTRA_CSS}</style>${form}<div id="results"></div>
      <script>window.HAVE=${JSON.stringify(have)};window.TARGET=${target ? target.id : "null"};window.HEALTH=${JSON.stringify(health)};</script>
+     <script>${ADD_FORM_JS}</script>
      <script>${CLIENT}</script>`);
 }

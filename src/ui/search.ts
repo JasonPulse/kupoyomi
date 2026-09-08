@@ -34,7 +34,7 @@ export async function addSeries(v: {
       if (found.rowCount === 0) throw new Error(`no series ${v.seriesId}`);
       id = found.rows[0]!.id;
     } else {
-      // No series given, so fall back to the folder -- but match it case-insensitively,
+      // No series given, so fall back to the folder. But match it case-insensitively,
       // because a title differing only in capitals is the same work every time.
       const folder = canonical(v.title);
       const near = await client.query<{ id: number }>(

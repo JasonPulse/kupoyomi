@@ -98,12 +98,11 @@ export async function purgePaidSources(opts: { dryRun?: boolean } = {}): Promise
   const pkgs = (await gql<{ extensions: { nodes: Array<{ pkgName: string; name: string }> } }>(
     `{ extensions(condition:{isInstalled:true}) { nodes { pkgName name } } }`)).extensions.nodes
     .filter((e) => re.test(e.name) || re.test(e.pkgName));
+  const { setExtension } = await import("./extensions.js");
   for (const e of pkgs) {
-    await gql(`mutation($pkg:String!){ updateExtension(input:{id:$pkg,patch:{uninstall:true}}){ clientMutationId } }`,
-      { pkg: e.pkgName }).catch((err: unknown) => {
-        console.log(`  could not uninstall ${e.pkgName}: ${err instanceof Error ? err.message : String(err)}`);
-      });
-    await db().query("UPDATE extension SET desired = false WHERE pkg_name = $1", [e.pkgName]);
+    await setExtension(e.pkgName, false).catch((err: unknown) => {
+      console.log(`  could not uninstall ${e.pkgName}: ${err instanceof Error ? err.message : String(err)}`);
+    });
     console.log(`  uninstalled ${e.name} (${e.pkgName})`);
   }
   console.log(`${pkgs.length} extension${pkgs.length === 1 ? "" : "s"} uninstalled and marked undesired`);

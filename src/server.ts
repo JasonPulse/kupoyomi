@@ -40,7 +40,8 @@ const serveCover = (res: import("node:http").ServerResponse, seriesId: number): 
     })
     .catch(() => { res.writeHead(500); res.end(); });
 };
-import { installedExtensions, installExtension, serverAbout, fetchExtensionIndex } from "./suwayomi.js";
+import { installedExtensions, serverAbout, fetchExtensionIndex } from "./suwayomi.js";
+import { setInstalled } from "./extensions.js";
 import { libraryPage } from "./ui/library.js";
 import { addSeries } from "./ui/search.js";
 import { searchPage } from "./ui/searchpage.js";
@@ -83,7 +84,7 @@ export async function reconcileExtensions(): Promise<{ desired: number; installe
   const failed: string[] = [];
   for (const pkg of missing) {
     try {
-      await installExtension(pkg);
+      await setInstalled(pkg, true);
       await db().query("UPDATE extension SET last_installed_at = now() WHERE pkg_name = $1", [pkg]);
     } catch {
       // An extension keiyoushi has removed cannot be reinstalled at any price. That

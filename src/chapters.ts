@@ -104,8 +104,15 @@ export const supersededByParts = (n: number, heldAsParts: Set<number>): boolean 
  * the library. Written inline they were two more copies to keep in step, so they are
  * these constants instead.
  */
-export const IS_PART_SQL = "chapter_number <> trunc(chapter_number)";
-export const BASE_OF_SQL = "trunc(chapter_number)";
+export const isPartSql = (alias = ""): string => {
+  const c = alias ? `${alias}.chapter_number` : "chapter_number";
+  return `${c} <> trunc(${c})`;
+};
+export const baseOfSql = (alias = ""): string =>
+  `trunc(${alias ? `${alias}.chapter_number` : "chapter_number"})`;
+
+export const IS_PART_SQL = isPartSql();
+export const BASE_OF_SQL = baseOfSql();
 
 /**
  * What a source offers measured against what a series holds.

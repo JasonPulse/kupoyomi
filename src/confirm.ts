@@ -67,7 +67,7 @@ export async function listCandidates(opts: { id?: number } = {}): Promise<void> 
     console.log(`\n[${r.id}] ${title}`);
     console.log(`     ${r.file_count} files stranded under ${r.dead_source ?? "-"}`);
     if (r.candidates.length === 0) {
-      console.log("     no exact-title match on any live source -- needs a manual search");
+      console.log("     no exact-title match on any live source. Needs a manual search");
       continue;
     }
     for (const c of r.candidates) {
@@ -87,7 +87,7 @@ export async function listCandidates(opts: { id?: number } = {}): Promise<void> 
         cmp.missing.length, cmp.latest, cmp.chapters === 0 ? "no chapters" : null,
         cmp.offered, held);
       if (cmp.chapters === 0) {
-        console.log(`     --pick ${String(c.mangaId).padEnd(6)} ${c.sourceName.padEnd(20)} no chapters -- useless as a home`);
+        console.log(`     --pick ${String(c.mangaId).padEnd(6)} ${c.sourceName.padEnd(20)} no chapters. Useless as a home`);
         continue;
       }
       const range = cmp.range ? `${cmp.range[0]}-${cmp.range[1]}` : "-";

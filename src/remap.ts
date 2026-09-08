@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { canonical } from "./seed.js";
-import { gql } from "./suwayomi.js";
+import { chapterNumbersOf } from "./suwayomi.js";
 import { resolveManga } from "./match.js";
 import { heldChapters } from "./held.js";
 import { isPart } from "./chapters.js";
@@ -13,6 +13,39 @@ import { isPart } from "./chapters.js";
  * directory listing sorts correctly, and readable by any server if this project is
  * ever abandoned.
  */
+/**
+ * Puts a file that is already on disk into the library and records it.
+ *
+ * Four callers did this: adoption from a linked folder, archiving a finished series,
+ * relayout of the legacy tree, and the importer's remap. All four built the destination
+ * name, made the directory, hardlinked, and inserted the chapter row, and they had drifted
+ * on which columns they wrote.
+ *
+ * Hardlinked rather than copied, so the source tree is untouched and the operation is
+ * reversible until you delete it. Verified beforehand that the CIFS share supports
+ * hardlinks; symlinks it does not. Returns false when the ledger already had the chapter.
+ */
+/** Where a chapter belongs in the canonical tree. Assembled by hand in four places. */
+export const libraryPathFor = (
+  title: string, folder: string, num: string, scanlator: string | null,
+): string => `${config.libraryRoot}/${folder}/${chapterFilename(title, num, scanlator)}`;
+
+export async function adoptFile(
+  seriesId: number, title: string, folder: string,
+  chapter: { number: string; src: string; scanlator: string | null;
+             pageCount?: number | null; uploadedAt?: Date | null; bindingId?: number | null },
+): Promise<false | string> {
+  const dest = libraryPathFor(title, folder, chapter.number, chapter.scanlator);
+  mkdirSync(dirname(dest), { recursive: true });
+  if (!existsSync(dest)) linkSync(chapter.src, dest);
+  const r = await db().query(
+    `INSERT INTO chapter (series_id, chapter_number, file_path, page_count, scanlator, binding_id, uploaded_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (series_id, chapter_number) DO NOTHING`,
+    [seriesId, chapter.number, dest, chapter.pageCount ?? null, chapter.scanlator,
+     chapter.bindingId ?? null, chapter.uploadedAt ?? null]);
+  return (r.rowCount ?? 0) > 0 ? dest : false;
+}
+
 export const chapterFilename = (title: string, num: string, scanlator: string | null): string => {
   const n = Number(num);
   const padded = isPart(n) ? n.toFixed(2).padStart(7, "0") : String(n).padStart(4, "0");
@@ -55,12 +88,8 @@ export async function remap(seriesId: number, opts: { dryRun?: boolean } = {}): 
 
   // What the new source offers. Primed first: a searched-but-never-opened manga has
   // a row and no chapter list.
-  await gql(`mutation($id:Int!){ fetchMangaAndChapters(input:{id:$id,fetchChapters:true,fetchManga:true}){ clientMutationId } }`,
-    { id: mangaId }).catch(() => undefined);
-  const target = await gql<{ manga: { chapters: { nodes: Array<{ chapterNumber: number | null }> } } }>(
-    `{ manga(id:${mangaId}) { chapters { nodes { chapterNumber } } } }`);
-  const offered = new Set(
-    target.manga.chapters.nodes.map((c) => c.chapterNumber).filter((n): n is number => n !== null));
+  const offeredNums = await chapterNumbersOf(mangaId);
+  const offered = new Set(offeredNums);
 
   // What we already hold, from heldChapters: the same function the review page uses to
   // say "you hold 44 chapters, 1-44".
@@ -89,15 +118,11 @@ export async function remap(seriesId: number, opts: { dryRun?: boolean } = {}): 
     if (!existsSync(src)) { absent++; continue; }          // Suwayomi's flag lied again
     if (!offered.has(Number(c.chapter_number))) { notOffered++; }
 
-    const dest = `${targetDir}/${chapterFilename(series.title, c.chapter_number, c.scanlator)}`;
     if (opts.dryRun) { adopted++; continue; }
-    mkdirSync(dirname(dest), { recursive: true });
-    if (!existsSync(dest)) linkSync(src, dest);
-    const r = await p.query(
-      `INSERT INTO chapter (series_id, chapter_number, file_path, page_count, scanlator, binding_id, uploaded_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (series_id, chapter_number) DO NOTHING`,
-      [seriesId, c.chapter_number, dest, c.page_count, c.scanlator, binding.id, c.uploaded_at]);
-    if (r.rowCount === 0) alreadyThere++; else adopted++;
+    if (await adoptFile(seriesId, series.title, series.folder, {
+      number: c.chapter_number, src, scanlator: c.scanlator,
+      pageCount: c.page_count, uploadedAt: c.uploaded_at, bindingId: binding.id,
+    })) adopted++; else alreadyThere++;
   }
 
   const toFetch = [...offered].filter((n) => !held.has(n)).sort((a, b) => a - b);

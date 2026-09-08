@@ -187,6 +187,38 @@ a.series:hover{text-decoration:underline;color:#f6e6c6}
   background:rgba(0,0,0,.7);color:var(--warn);border:1px solid rgba(224,163,60,.4)}
 `;
 
+/**
+ * The add-form handler, shared by the search page and the browse page.
+ *
+ * Both intercepted a .addf submit, posted to /add, read the series id out of the redirect
+ * and swapped the form for a link. Two copies of the same handler on two pages is the
+ * exact defect worth avoiding: the search page learned to say "attached" when attaching
+ * and the browse page never did.
+ *
+ * Shipped as a string because these pages build their client code as template literals.
+ * No backticks inside: one would end the literal it is interpolated into.
+ */
+export const ADD_FORM_JS = String.raw`
+// Adding must not navigate: batch-adding several results from one search is the point.
+document.addEventListener('submit', ev => {
+  const f = ev.target;
+  if (!f.classList || !f.classList.contains('addf')) return;
+  ev.preventDefault();
+  const b = f.querySelector('button');
+  const attaching = !!f.querySelector('input[name=seriesId]');
+  b.disabled = true; b.textContent = attaching ? 'attaching' : 'adding';
+  fetch('/add', { method: 'POST', body: new URLSearchParams(new FormData(f)) })
+    .then(r => {
+      const id = (r.url.split('/series/')[1] || '').split(/[^0-9]/)[0];
+      f.outerHTML = id
+        ? '<span class="rec">' + (attaching ? 'attached' : 'added') +
+          '</span> <a class="series" href="/series/' + id + '">open</a>'
+        : '<span class="bad">failed</span>';
+    })
+    .catch(() => { b.disabled = false; b.textContent = 'retry'; });
+});
+`;
+
 export type Nav = "library" | "browse" | "search" | "queue" | "downloads" | "extensions";
 
 /** A framed panel, for the primary content of a page. */

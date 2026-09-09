@@ -83,6 +83,32 @@ export async function planRemoval(seriesId: number): Promise<RemovalPlan> {
 }
 
 /**
+ * Deletes a directory tree, tolerating a husk the share will not let go of.
+ *
+ * rmSync unlinks every file and then removes the directory. On this CIFS share the
+ * directory listing has not caught up by the time rmdir runs, so it fails with ENOTEMPTY
+ * on a directory it has just emptied itself. That threw before the ledger was touched,
+ * which left "The Inferior Magic Swordsman" with all 104 files deleted and all 104 rows
+ * still claiming to hold them: the library reported chapters that were gone.
+ *
+ * Retried first, which is what maxRetries is for. If it still will not go and nothing is
+ * left inside, the removal has done its job. An empty directory is cosmetic, and refusing
+ * to update the ledger over it is what produced the damage.
+ */
+export function removeTree(dir: string): void {
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 6, retryDelay: 250 });
+    return;
+  } catch (err) {
+    let left: string[];
+    try { left = readdirSync(dir); } catch { return; }   // gone after all
+    if (left.length > 0) throw err;                      // real files remain, so stop
+    console.log(`  ${dir} is empty but the share will not remove the directory (${
+      (err as NodeJS.ErrnoException).code}); leaving it and carrying on`);
+  }
+}
+
+/**
  * Removes a series. The database rows go through the cascades; files only go if asked,
  * and the old tree only if asked separately, because that copy is the original.
  */
@@ -95,13 +121,13 @@ export async function removeSeries(
 
   if (opts.files && existsSync(plan.canonicalDir)) {
     deletedFiles += readdirSync(plan.canonicalDir).length;
-    rmSync(plan.canonicalDir, { recursive: true, force: true });
+    removeTree(plan.canonicalDir);
     deletedDirs.push(plan.canonicalDir);
   }
   if (opts.legacy) {
     for (const d of plan.legacyDirs) {
       deletedFiles += d.files;
-      rmSync(d.path, { recursive: true, force: true });
+      removeTree(d.path);
       deletedDirs.push(d.path);
     }
   }

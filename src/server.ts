@@ -26,6 +26,34 @@ const hashFile = (p: string): string | null => {
 };
 
 /**
+ * Streams a file, answering 404 if it cannot be opened.
+ *
+ * The status is not written until the file is known to open. Writing 200 first and then
+ * 404 from the stream's error handler throws ERR_HTTP_HEADERS_SENT, and it throws inside
+ * an event handler where nothing catches it, so the process dies. A row whose cover_path
+ * points at a deleted file was enough: series 112 lost its files to a half-finished
+ * removal, kept the row, and every library page load then killed the server.
+ */
+type Sink = { writeHead: (code: number, headers?: Record<string, string>) => unknown;
+              end: () => unknown; headersSent?: boolean };
+type Source = { once: (ev: string, fn: () => void) => unknown; pipe: (dst: never) => unknown };
+
+export const streamFile = (
+  res: Sink, path: string, headers: Record<string, string>,
+  open: (p: string) => Source,
+): void => {
+  const stream = open(path);
+  stream.once("open", () => {
+    res.writeHead(200, headers);
+    stream.pipe(res as never);
+  });
+  stream.once("error", () => {
+    if (!res.headersSent) res.writeHead(404);
+    res.end();
+  });
+};
+
+/**
  * Streams a series cover. Written twice, once for the web UI and once for Paperback, with
  * the same query, the same 404, the same type sniff and the same cache header.
  */
@@ -35,10 +63,11 @@ const serveCover = (res: import("node:http").ServerResponse, seriesId: number): 
     .then((r) => {
       const cp = r.rows[0]?.cover_path;
       if (!cp) { res.writeHead(404); res.end(); return; }
-      res.writeHead(200, { "content-type": sniffImage(cp), "cache-control": "public, max-age=3600" });
-      createReadStream(cp).on("error", () => { res.writeHead(404); res.end(); }).pipe(res);
+      streamFile(res, cp,
+        { "content-type": sniffImage(cp), "cache-control": "public, max-age=3600" },
+        (f) => createReadStream(f) as unknown as Source);
     })
-    .catch(() => { res.writeHead(500); res.end(); });
+    .catch(() => { if (!res.headersSent) res.writeHead(500); res.end(); });
 };
 import { installedExtensions, serverAbout, fetchExtensionIndex } from "./suwayomi.js";
 import { setInstalled } from "./extensions.js";
@@ -514,8 +543,13 @@ export async function serve(): Promise<void> {
         }
         throw new Error("not found");
       };
-      act().then(redirect).catch((e: unknown) =>
-        send(400, { error: e instanceof Error ? e.message : String(e) }));
+      act().then(redirect).catch((e: unknown) => {
+        // Logged as well as answered. A failed action showed the caller a line of JSON and
+        // recorded nothing anywhere, so "I could not delete a series" had to be diagnosed
+        // by guessing which of several steps had thrown.
+        console.log(`POST ${path} failed: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}`);
+        send(400, { error: e instanceof Error ? e.message : String(e) });
+      });
       return;
     }
 

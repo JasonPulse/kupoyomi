@@ -100,3 +100,102 @@ test("a decoy folder the guess produces is not offered for deletion", { skip: !h
     `a same-named folder with unrelated files must NOT be offered: ${JSON.stringify(paths)}`);
   assert.ok(existsSync(join(DECOY, "Chapter 1.cbz")), "decoy still intact");
 });
+
+/**
+ * A directory the share will not let go of must not strand the ledger.
+ *
+ * rmSync unlinks every file and then removes the directory. On the CIFS share the listing
+ * has not caught up by the time rmdir runs, so it fails with ENOTEMPTY on a directory it
+ * has just emptied. removeSeries did the files first and the ledger second, so the throw
+ * landed between them: "The Inferior Magic Swordsman" lost all 104 files and kept all 104
+ * rows, and the library reported chapters that were gone.
+ */
+test("an empty directory that will not delete does not fail the removal", async () => {
+  const { removeTree } = await import("../src/remove.js");
+  const { mkdirSync, mkdtempSync, writeFileSync, chmodSync, existsSync, readdirSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const parent = mkdtempSync(join(tmpdir(), "kupo-rm-"));
+  const dir = join(parent, "series");
+  mkdirSync(dir);
+
+  // A read-only parent is the closest reproduction available offline: rmdir on the child
+  // fails for a reason outside our control, exactly as it does on the share.
+  chmodSync(parent, 0o500);
+  try {
+    removeTree(dir);
+    assert.ok(existsSync(dir), "the husk is still there, which is fine");
+  } finally {
+    chmodSync(parent, 0o700);
+  }
+
+  // But a directory that still holds files has to stop the removal, or the ledger would
+  // be cleared while the chapters were still on disk. The directory itself is made
+  // read-only here, so the file inside genuinely cannot be unlinked. A read-only parent
+  // is not enough: the file still goes, and then the empty husk is the correct outcome.
+  writeFileSync(join(dir, "ch1.cbz"), "x");
+  chmodSync(dir, 0o500);
+  try {
+    assert.throws(() => removeTree(dir), "files remain, so this must not be treated as done");
+    assert.equal(readdirSync(dir).length, 1, "and the file is untouched");
+  } finally {
+    chmodSync(dir, 0o700);
+  }
+});
+
+/**
+ * A missing file must answer 404, not kill the server.
+ *
+ * The cover handler wrote 200, then opened the file, then wrote 404 from the stream's
+ * error handler. Writing headers twice throws ERR_HTTP_HEADERS_SENT, and it throws inside
+ * an event handler where nothing catches it, so the process exits. A row whose cover_path
+ * pointed at a deleted file was all it took: series 112 lost its files to a half-finished
+ * removal, kept the row, and every library page load then crashed the server.
+ */
+test("streaming a file that cannot be opened answers once and does not throw", async () => {
+  const { streamFile } = await import("../src/server.js");
+
+  type Handlers = Record<string, () => void>;
+  const fakeStream = (): { once: (e: string, f: () => void) => unknown; pipe: (d: never) => unknown;
+                           fire: (e: string) => void; piped: () => boolean } => {
+    const handlers: Handlers = {};
+    let piped = false;
+    return {
+      once(ev, fn) { handlers[ev] = fn; return this; },
+      pipe() { piped = true; return null; },
+      fire(ev) { handlers[ev]?.(); },
+      piped: () => piped,
+    };
+  };
+  const fakeRes = (): { writeHead: (c: number) => unknown; end: () => unknown;
+                        headersSent: boolean; codes: number[] } => {
+    const codes: number[] = [];
+    return {
+      codes,
+      headersSent: false,
+      writeHead(c) {
+        if (this.headersSent) throw new Error("ERR_HTTP_HEADERS_SENT");
+        codes.push(c); this.headersSent = true; return this;
+      },
+      end() { return this; },
+    };
+  };
+
+  // A stream that never opens, which is what a deleted file gives you.
+  const bad = fakeStream();
+  const res1 = fakeRes();
+  streamFile(res1, "/nowhere/gone.jpg", { "content-type": "image/jpeg" }, () => bad);
+  bad.fire("error");
+  assert.deepEqual(res1.codes, [404], "one status, and it is the failure");
+  assert.equal(bad.piped(), false, "nothing was piped from a stream that never opened");
+
+  // The success path writes 200 exactly once, and only after the file opens.
+  const good = fakeStream();
+  const res2 = fakeRes();
+  streamFile(res2, "/somewhere/real.jpg", { "content-type": "image/jpeg" }, () => good);
+  assert.deepEqual(res2.codes, [], "nothing is written before the file opens");
+  good.fire("open");
+  assert.deepEqual(res2.codes, [200], "then exactly one 200");
+  assert.equal(good.piped(), true, "and the body follows");
+});

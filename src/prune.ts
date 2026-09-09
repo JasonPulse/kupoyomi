@@ -9,6 +9,27 @@ import { db } from "./db.js";
  * re-fetched. Rows written by earlier buggy runs survive re-seeding because seed uses
  * ON CONFLICT DO NOTHING, so this has to be an explicit operation.
  */
+/**
+ * Makes the ledger agree with the disk for one series, or for all of them.
+ *
+ * Disk is the source of truth, so a row whose file is gone is the ledger being wrong and
+ * it goes. Returns how many rows it dropped, which is what a caller mid-operation needs
+ * to report.
+ */
+export async function dropMissingFiles(seriesId?: number): Promise<number> {
+  const p = db();
+  const rows = (await p.query<{ series_id: number; chapter_number: string; file_path: string }>(
+    `SELECT series_id, chapter_number, file_path FROM chapter${
+      seriesId === undefined ? "" : " WHERE series_id = $1"}`,
+    seriesId === undefined ? [] : [seriesId])).rows;
+  const gone = rows.filter((r) => !existsSync(r.file_path));
+  for (const g of gone) {
+    await p.query("DELETE FROM chapter WHERE series_id = $1 AND chapter_number = $2",
+      [g.series_id, g.chapter_number]);
+  }
+  return gone.length;
+}
+
 export async function prune(opts: { dryRun?: boolean } = {}): Promise<void> {
   const p = db();
   const rows = (await p.query<{ series_id: number; chapter_number: string; file_path: string; title: string }>(
@@ -25,9 +46,6 @@ export async function prune(opts: { dryRun?: boolean } = {}): Promise<void> {
   }
   if (opts.dryRun) return;
 
-  for (const g of gone) {
-    await p.query("DELETE FROM chapter WHERE series_id = $1 AND chapter_number = $2",
-      [g.series_id, g.chapter_number]);
-  }
-  console.log(`removed ${gone.length}; those chapters will resurface as gaps, which is the truth`);
+  const dropped = await dropMissingFiles();
+  console.log(`removed ${dropped}; those chapters will resurface as gaps, which is the truth`);
 }

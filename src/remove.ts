@@ -2,6 +2,7 @@ import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { config } from "./config.js";
 import { db } from "./db.js";
 import { sanitize } from "./suwayomi.js";
+import { dropMissingFiles } from "./prune.js";
 
 export type RemovalPlan = {
   seriesId: number; title: string; folder: string;
@@ -83,29 +84,25 @@ export async function planRemoval(seriesId: number): Promise<RemovalPlan> {
 }
 
 /**
- * Deletes a directory tree, tolerating a husk the share will not let go of.
+ * Deletes a directory tree and proves it is gone.
  *
  * rmSync unlinks every file and then removes the directory. On this CIFS share the
- * directory listing has not caught up by the time rmdir runs, so it fails with ENOTEMPTY
- * on a directory it has just emptied itself. That threw before the ledger was touched,
- * which left "The Inferior Magic Swordsman" with all 104 files deleted and all 104 rows
- * still claiming to hold them: the library reported chapters that were gone.
+ * listing has not caught up by the time rmdir runs, so it fails with ENOTEMPTY on a
+ * directory it has just emptied. Retried first, which is what maxRetries is for.
  *
- * Retried first, which is what maxRetries is for. If it still will not go and nothing is
- * left inside, the removal has done its job. An empty directory is cosmetic, and refusing
- * to update the ledger over it is what produced the damage.
+ * A directory that survives is not cosmetic. Disk is the source of truth, so a folder
+ * still on disk means the series is still on disk, and reporting success over it would
+ * make the ledger the authority instead. rmSync has also returned successfully against
+ * this share with the directory still present, so the result is checked rather than
+ * trusted.
  */
 export function removeTree(dir: string): void {
-  try {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 6, retryDelay: 250 });
-    return;
-  } catch (err) {
-    let left: string[];
-    try { left = readdirSync(dir); } catch { return; }   // gone after all
-    if (left.length > 0) throw err;                      // real files remain, so stop
-    console.log(`  ${dir} is empty but the share will not remove the directory (${
-      (err as NodeJS.ErrnoException).code}); leaving it and carrying on`);
-  }
+  rmSync(dir, { recursive: true, force: true, maxRetries: 6, retryDelay: 250 });
+  if (!existsSync(dir)) return;
+  let left: string[] = [];
+  try { left = readdirSync(dir); } catch { /* unreadable counts as still there */ }
+  throw new Error(`${dir} is still on disk after removal, holding ${left.length} `
+    + `${left.length === 1 ? "entry" : "entries"}`);
 }
 
 /**
@@ -119,16 +116,32 @@ export async function removeSeries(
   const deletedDirs: string[] = [];
   let deletedFiles = 0;
 
+  // Whatever went has to be reflected before anything else can fail, because the ledger
+  // saying it holds a file that is gone is the state this operation must never leave
+  // behind. "The Inferior Magic Swordsman" lost 104 files to a failed rmdir and kept 104
+  // rows, and the library reported chapters that were not there.
+  const settle = async (err: unknown): Promise<never> => {
+    const dropped = await dropMissingFiles(seriesId);
+    throw new Error(`${err instanceof Error ? err.message : String(err)}. `
+      + `${dropped} ledger rows for files that did go have been dropped, so the ledger `
+      + `matches the disk. The series is kept because its folder is still there. `
+      + `Removing it again will finish the job.`);
+  };
+
   if (opts.files && existsSync(plan.canonicalDir)) {
     deletedFiles += readdirSync(plan.canonicalDir).length;
-    removeTree(plan.canonicalDir);
-    deletedDirs.push(plan.canonicalDir);
+    try {
+      removeTree(plan.canonicalDir);
+      deletedDirs.push(plan.canonicalDir);
+    } catch (err) { await settle(err); }
   }
   if (opts.legacy) {
     for (const d of plan.legacyDirs) {
       deletedFiles += d.files;
-      removeTree(d.path);
-      deletedDirs.push(d.path);
+      try {
+        removeTree(d.path);
+        deletedDirs.push(d.path);
+      } catch (err) { await settle(err); }
     }
   }
 

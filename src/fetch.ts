@@ -6,8 +6,7 @@ import { gql, primeManga } from "./suwayomi.js";
 import { resolveManga } from "./match.js";
 import { buildCbz, comicInfo } from "./cbz.js";
 import { libraryPathFor } from "./remap.js";
-import { preferWholeChapters, wholesHeldAsParts, isPart, basesOf, supersededByParts,
-  heldFor, IS_PART_SQL, BASE_OF_SQL } from "./chapters.js";
+import { heldFor } from "./chapters.js";
 
 /** Suwayomi's page proxy lives beside the graphql endpoint. */
 
@@ -70,33 +69,26 @@ export async function scanWanted(opts: { seriesId?: number } = {}): Promise<void
       .map((c) => c.chapterNumber).filter((n): n is number => n !== null);
     const { kept: offeredAll, dropped } = withoutOutliers(offered);
     const held = await heldFor(b.series_id);
-    const heldNums = [...held];
-    const heldAsParts = wholesHeldAsParts(heldNums);
 
-    const wholeOnly = (process.env["FETCH_WHOLE_ONLY"] ?? "true") !== "false" && !b.take_splits;
-    const offered2 = wholeOnly ? preferWholeChapters(offeredAll, held) : offeredAll;
-    const skippedSplits = offeredAll.length - offered2.length;
-    const partsTaken = offered2.filter(isPart).length;
-    if (dropped.length > 0) {
-      console.log(`  ${b.title.slice(0, 40)}: ignoring ${dropped.join(", ")}, `
-        + `${dropped.length === 1 ? "that number is" : "those numbers are"} hundreds above the rest of the run`);
-    }
-    if (skippedSplits > 0) {
-      console.log(`  ${b.title.slice(0, 40)}: skipping ${skippedSplits} part-numbered chapter${
-        skippedSplits === 1 ? "" : "s"} that arrive whole as well`);
-    }
-    if (wholeOnly && partsTaken > 0) {
-      const bases = basesOf(offered2);
-      console.log(`  ${b.title.slice(0, 40)}: taking ${partsTaken} parts for chapter${
-        bases.length === 1 ? "" : "s"} ${bases.join(", ")}, which this source has no whole version of`);
-    }
-
+    // Every chapter number the source lists is a chapter. Nothing is skipped for looking
+    // like a duplicate, because the numbering cannot tell you whether it is one.
+    //
+    // The old rule refused a part when the source also offered the whole, on the reasoning
+    // that 25.1 and 25.2 are chapter 25 twice. The Golden Experience Point settles it: its
+    // source lists 10, 10-1 and 10-2, and 10-1 and 10-2 share zero of their 37 pages with
+    // chapter 10. They are the story, and they were being dropped without a word. Across
+    // the library that rule was silently discarding whole runs of chapters.
+    //
+    // The two costs are not comparable. Taking a real duplicate wastes disk and a moment
+    // of reading. Skipping real content loses it, quietly, with nothing to show that
+    // anything is missing. Duplicates are reclaimed afterwards by comparing the files we
+    // hold, which is the only test that actually knows the answer.
+    const offered2 = offeredAll;
     const moved = await pointQueueAt(b.series_id, b.id, offered2);
     if (moved > 0) console.log(`  ${b.title.slice(0, 40)}: moved ${moved} queued chapters to ${b.source_name}`);
 
     for (const n of offered2) {
       if (held.has(n)) continue;
-      if (wholeOnly && supersededByParts(n, heldAsParts)) continue;
       const r = await p.query(
         `INSERT INTO wanted (series_id, chapter_number, binding_id) VALUES ($1,$2,$3)
          ON CONFLICT (series_id, chapter_number) DO NOTHING`, [b.series_id, n, b.id]);
@@ -475,22 +467,11 @@ export async function fetchWanted(
           `UPDATE wanted SET state='done', finished_at=now(), attempts=attempts+1,
              last_error=NULL, retry_after=NULL WHERE series_id=$1 AND chapter_number=$2`,
           [it.series_id, it.chapter_number]);
-        // A whole chapter supersedes the parts it was split into, so they go with it
-        // rather than sitting there as a second copy waiting for a manual prune.
-        if (!isPart(Number(it.chapter_number))) {
-          const parts = (await p.query<{ chapter_number: string; file_path: string }>(
-            `SELECT chapter_number, file_path FROM chapter
-              WHERE series_id = $1 AND ${IS_PART_SQL}
-                AND ${BASE_OF_SQL} = $2`, [it.series_id, it.chapter_number])).rows;
-          for (const part of parts) {
-            try { rmSync(part.file_path); } catch { /* a missing file is already gone */ }
-            await p.query("DELETE FROM chapter WHERE series_id = $1 AND chapter_number = $2",
-              [it.series_id, part.chapter_number]);
-          }
-          if (parts.length > 0) {
-            console.log(`      superseded ${parts.length} part${parts.length === 1 ? "" : "s"} of ch ${it.chapter_number}`);
-          }
-        }
+        // Nothing is deleted here any more. Downloading whole chapter 10 used to delete
+        // 10.1 and 10.2 as the parts it superseded, which for this library would have
+        // thrown away 37 pages of story the moment the whole arrived. Whether two
+        // chapters are the same pages is decided by comparing the files, not by their
+        // numbers, and that lives in prune-splits.
         done++;
         // Its turn advances by one chapter. Divided by the block size this is the turn
         // number, so twenty-five successes move the series behind the others.

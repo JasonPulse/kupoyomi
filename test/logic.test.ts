@@ -241,33 +241,51 @@ test("a whole chapter already held as parts is not fetched again", () => {
  * Every part was dropped, the scan queued nothing, and the downloader said it had nothing
  * to do while the source held all four.
  */
-const { preferWholeChapters, wholesCovered, missingWholes, supersededByWhole,
-  wholesHeldAsParts, compareOffering } = await import("../src/chapters.js");
+const { wholesCovered, missingWholes, compareOffering } = await import("../src/chapters.js");
 
-test("a chapter offered only in parts is taken as parts", () => {
-  const offered = [1.1, 1.2, 1.3, 1.4, 2, 3, 4, 5, 6, 7.1, 7.2, 7.3, 8.1, 8.2, 8.3,
-    9.1, 9.2, 9.3, 10, 11.1, 11.2, 12, 13.1, 13.2, 14, 15, 16, 17];
-  const held = new Set([1, 2, 3, 4, 5, 6, 10, 12, 13, 14, 15, 16, 17]);
-  const take = preferWholeChapters(offered, held);
+/**
+ * A chapter number is a chapter, and nothing is dropped for looking like a duplicate.
+ *
+ * The rule used to refuse a part when the source also offered the whole, on the reasoning
+ * that 25.1 and 25.2 are chapter 25 twice. The Golden Experience Point disproved it: its
+ * source lists 10, 10-1 and 10-2, and 10-1 and 10-2 share zero of their 37 pages with
+ * chapter 10. Whole runs of story were being discarded with nothing said.
+ *
+ * Whether two chapters hold the same pages is answered by opening them, which is what
+ * isCopyOf does, and never by comparing their numbers.
+ */
+test("a part beside a whole chapter is kept when its pages differ", async () => {
+  const { isCopyOf } = await import("../src/adopt.js");
+  const { buildCbz } = await import("../src/cbz.js");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
 
-  // The four that were unreachable are now offered, as their parts.
-  for (const n of [7.1, 7.2, 7.3, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 11.1, 11.2]) {
-    assert.ok(take.includes(n), `chapter ${n} is the only form this source has`);
-  }
-  // Parts of chapters already held whole are still refused, or chapter 1 arrives a
-  // second time in four pieces.
-  for (const n of [1.1, 1.2, 1.3, 1.4, 13.1, 13.2]) {
-    assert.equal(take.includes(n), false, `${n} duplicates a whole chapter already held`);
-  }
-});
+  const dir = mkdtempSync(join(tmpdir(), "kupo-split-"));
+  const page = (s: string): Buffer => Buffer.from(s.repeat(64));
+  const write = (name: string, pages: string[]): string => {
+    const path = join(dir, name);
+    writeFileSync(path, buildCbz(pages.map((p, i) => ({ name: `${i}.jpg`, data: page(p) })), new Date(0)));
+    return path;
+  };
 
-test("a part is refused when the same source also offers the whole", () => {
-  // Both forms on offer means the whole is the one to take.
-  assert.deepEqual(preferWholeChapters([25, 25.1, 25.2], new Set()), [25]);
-  // And with no whole anywhere, the parts are the chapter.
-  assert.deepEqual(preferWholeChapters([25.1, 25.2], new Set()), [25.1, 25.2]);
-  // Whole chapters are never touched.
-  assert.deepEqual(preferWholeChapters([1, 2, 3], new Set()), [1, 2, 3]);
+  // The Golden Experience Point shape: a whole chapter and two that share none of it.
+  const whole = write("c10.cbz", ["a", "b", "c", "d"]);
+  const distinct = write("c10-1.cbz", ["x", "y"]);
+  assert.equal(await isCopyOf(distinct, whole), false,
+    "none of its pages are in chapter 10, so it is a chapter and it stays");
+
+  // A genuine split: every page of the part is inside the whole.
+  const split = write("c10-split.cbz", ["a", "b"]);
+  assert.equal(await isCopyOf(split, whole), true, "every page is already there, so it is a copy");
+
+  // A part that overlaps but also carries pages of its own is not a copy.
+  const partial = write("c10-partial.cbz", ["a", "b", "z"]);
+  assert.equal(await isCopyOf(partial, whole), false,
+    "one page of its own is enough to keep it, because losing it is the worse error");
+
+  // An unreadable file is undecided, and undecided means keep.
+  assert.equal(await isCopyOf(join(dir, "missing.cbz"), whole), false);
 });
 
 /**
@@ -327,11 +345,6 @@ test("every consumer agrees a source carrying 7.1 carries chapter 7", () => {
   assert.deepEqual(missingWholes([1, 2, 12.3]), [3, 4, 5, 6, 7, 8, 9, 10, 11],
     "and a lone 12.3 still proves 3 through 11 are missing");
 
-  // The superseded and held-as-parts rules are the same rule read in each direction.
-  assert.equal(supersededByWhole(8.1, new Set([8])), true);
-  assert.equal(supersededByWhole(8.1, new Set([7])), false);
-  assert.equal(supersededByWhole(8, new Set([8])), false, "a whole chapter is never a duplicate");
-  assert.deepEqual([...wholesHeldAsParts([8.1, 8.2, 9])], [8]);
 });
 
 /**

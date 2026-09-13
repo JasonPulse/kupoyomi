@@ -5,7 +5,8 @@ import { db } from "./db.js";
 import { scanLegacyTree } from "./disk.js";
 import { parseChapterNumber } from "./chapternum.js";
 import { adoptFile } from "./remap.js";
-import { supersededByWhole, heldFor, IS_PART_SQL, isPartSql, baseOfSql } from "./chapters.js";
+import { heldFor, IS_PART_SQL, isPartSql, baseOfSql } from "./chapters.js";
+import { createHash } from "node:crypto";
 
 /**
  * Adopts chapters already on disk into a series, from every folder that holds them.
@@ -89,8 +90,6 @@ export async function findOnDisk(seriesId: number, opts: { propose?: boolean } =
     "SELECT title, folder FROM series WHERE id = $1", [seriesId])).rows[0];
   if (!s) throw new Error(`no series ${seriesId}`);
   const held = await heldFor(seriesId);
-  const takesSplits = (await p.query<{ t: boolean }>(
-    "SELECT take_splits AS t FROM series WHERE id = $1", [seriesId])).rows[0]?.t ?? false;
   const decided = new Map((await p.query<{ path: string; state: string }>(
     "SELECT path, state FROM legacy_link WHERE series_id = $1", [seriesId])).rows.map((r) => [r.path, r.state]));
   const aliases = (await p.query<{ norm: string }>(
@@ -118,11 +117,6 @@ export async function findOnDisk(seriesId: number, opts: { propose?: boolean } =
       const n = parseChapterNumber(f);
       if (n === null) continue;
       if (held.has(n)) { alreadyHeld++; continue; }
-      // A part-numbered chapter whose whole chapter is held was deleted on purpose.
-      // Offering it back put an adopt button on four folders that had nothing left to
-      // give, and pressing it would have undone the prune. A series that takes splits
-      // wants them, so it is exempt.
-      if (!takesSplits && supersededByWhole(n, held)) { alreadyHeld++; continue; }
       let size = 0;
       try { size = statSync(`${dir}/${f}`).size; } catch { continue; }
       const prev = best.get(n);
@@ -307,13 +301,11 @@ export async function redundantFolders(): Promise<Array<{
       const n = parseChapterNumber(f);
       // A file whose number cannot be read is not proven redundant, so it protects the folder.
       if (n === null) { missing++; continue; }
-      // A part-numbered chapter whose whole chapter is held was deleted on purpose, so it
-      // is accounted for rather than missing. Without this, 33 of the 37 folders kept back
-      // were kept by our own decision and could never be pruned. A series that takes
-      // splits is exempt: for it, a decimal is wanted and its absence is a real gap.
-      const discarded = !l.take_splits && supersededByWhole(n, held);
-      if (!held.has(n) && !discarded) { missing++; continue; }
-      if (discarded) continue;   // no file of ours to compare against, so nothing to count
+      // A chapter number we do not hold is a chapter this folder still has and the
+      // library does not, whatever the number looks like. Treating a part as accounted
+      // for because the whole was held is what let the library drop real chapters, and
+      // here it would have let the folder holding them be deleted.
+      if (!held.has(n)) { missing++; continue; }
       try {
         const st = statSync(`${l.path}/${f}`);
         bytes += st.size;
@@ -444,30 +436,70 @@ export async function importFolder(path: string, title?: string): Promise<number
 }
 
 /**
- * Part-numbered chapters held alongside the whole chapter they split.
+ * Part-numbered chapters that really are a second copy of the whole chapter beside them.
  *
- * A decimal is nearly always one chapter divided by a release group, so holding 25, 25.1
- * and 25.2 means reading chapter 25 twice. Those are redundant and can go.
+ * Holding 25, 25.1 and 25.2 may mean reading chapter 25 twice, or it may mean holding
+ * three chapters. The numbers cannot tell you which, and assuming they could cost this
+ * library real content: The Golden Experience Point is published as 10, 10-1 and 10-2,
+ * and 10-1 and 10-2 share none of their 37 pages with chapter 10.
  *
- * The ones where the whole number is NOT held are a different matter and are never
- * touched here. Checked against three sources, none of them offers the whole chapter at
- * all: Scumless Oblige has 2.1 and 2.2 and no chapter 2. Deleting those loses the chapter
- * outright, with nothing to re-fetch, so they are reported and left alone.
+ * So it opens the files. A part is redundant only when every page in it also appears in
+ * the whole chapter, compared by content hash. Anything else is a chapter and stays,
+ * whatever its number looks like.
  */
+const pagesOf = async (path: string): Promise<Set<string>> => {
+  const { listEntries, pageEntries, readEntry } = await import("./unzip.js");
+  const out = new Set<string>();
+  for (const e of pageEntries(await listEntries(path))) {
+    out.add(createHash("sha1").update(await readEntry(path, e)).digest("hex"));
+  }
+  return out;
+};
+
+/** Is every page of the part already inside the whole chapter. */
+export const isCopyOf = async (partPath: string, wholePath: string): Promise<boolean> => {
+  try {
+    const part = await pagesOf(partPath);
+    if (part.size === 0) return false;              // nothing read is not proof of anything
+    const whole = await pagesOf(wholePath);
+    for (const h of part) if (!whole.has(h)) return false;
+    return true;
+  } catch {
+    return false;                                   // unreadable means undecided, so keep it
+  }
+};
+
 export async function pruneSplitChapters(opts: { delete?: boolean } = {}): Promise<void> {
   const p = db();
-  const rows = (await p.query<{ series_id: number; title: string; chapter_number: string; file_path: string; whole_held: boolean }>(
+  const rows = (await p.query<{ series_id: number; title: string; chapter_number: string; file_path: string; whole_path: string | null }>(
     `SELECT c.series_id, s.title, c.chapter_number::text, c.file_path,
-            EXISTS (SELECT 1 FROM chapter c2 WHERE c2.series_id = c.series_id
-                     AND c2.chapter_number = ${baseOfSql("c")}) AS whole_held
+            (SELECT c2.file_path FROM chapter c2 WHERE c2.series_id = c.series_id
+              AND c2.chapter_number = ${baseOfSql("c")}) AS whole_path
        FROM chapter c JOIN series s ON s.id = c.series_id
       WHERE ${isPartSql("c")}
       ORDER BY s.title, c.chapter_number`)).rows;
 
-  const redundant = rows.filter((r) => r.whole_held);
-  const orphan = rows.filter((r) => !r.whole_held);
-  console.log(`${rows.length} part-numbered chapters: ${redundant.length} sit beside the whole chapter, `
-    + `${orphan.length} are the only copy of theirs`);
+  // Beside a whole chapter is not the same as being a copy of one, and only the files can
+  // say which. Every candidate is opened and compared page by page.
+  const beside = rows.filter((r) => r.whole_path !== null);
+  const redundant: typeof rows = [];
+  const distinct: typeof rows = [];
+  for (const r of beside) {
+    if (await isCopyOf(r.file_path, r.whole_path!)) redundant.push(r); else distinct.push(r);
+  }
+  const orphan = rows.filter((r) => r.whole_path === null);
+  console.log(`${rows.length} part-numbered chapters: ${redundant.length} are a second copy `
+    + `of the whole chapter beside them, ${distinct.length} sit beside a whole chapter but hold `
+    + `different pages, ${orphan.length} are the only copy of theirs`);
+
+  if (distinct.length > 0) {
+    const bySeries = new Map<string, number>();
+    for (const d of distinct) bySeries.set(d.title, (bySeries.get(d.title) ?? 0) + 1);
+    console.log(`\nkept, because their pages are not in the whole chapter and they are the story:`);
+    for (const [t, n] of [...bySeries.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12)) {
+      console.log(`  ${String(n).padStart(4)}  ${t.slice(0, 56)}`);
+    }
+  }
 
   if (orphan.length > 0) {
     const bySeries = new Map<string, number>();
@@ -500,7 +532,7 @@ export async function pruneSplitChapters(opts: { delete?: boolean } = {}): Promi
   const q = opts.delete
     ? await p.query(`DELETE FROM wanted WHERE state <> 'done' AND ${IS_PART_SQL}`)
     : { rowCount: 0 };
-  console.log(`\n${opts.delete ? `deleted ${gone}` : `would delete ${redundant.length}`} redundant chapters, `
+  console.log(`\n${opts.delete ? `deleted ${gone}` : `would delete ${redundant.length}`} chapters that are a second copy, `
     + `${(freed / 1048576).toFixed(0)}MB reclaimable`
     + (links > 0 ? `, ${links} are hardlinks the legacy folder still holds` : "")
     + ((q.rowCount ?? 0) > 0 ? `, and cleared ${q.rowCount} from the queue` : ""));

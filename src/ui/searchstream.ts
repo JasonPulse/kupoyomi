@@ -1,7 +1,7 @@
 import type { ServerResponse } from "node:http";
 import { gql, primeManga, SOURCE_SEARCH } from "../suwayomi.js";
 import { usableSources } from "../paid.js";
-import { preferWholeChapters, compareOffering, heldFor } from "../chapters.js";
+import { compareOffering, heldFor } from "../chapters.js";
 
 const SEARCH = SOURCE_SEARCH;
 
@@ -74,13 +74,10 @@ async function against(seriesId: number, offeredAll: number[]): Promise<{
 }> {
   const { db } = await import("../db.js");
   const held = await heldFor(seriesId);
-  // Count only what would actually be fetched. A whole-only series showed "+11 fills" for
-  // a source whose eleven were nine part-numbered chapters and two real ones, so the
-  // column promised eleven chapters and the queue asked for two.
-  const takesSplits = (await db().query<{ t: boolean }>(
-    "SELECT take_splits AS t FROM series WHERE id = $1", [seriesId])).rows[0]?.t ?? false;
-  const offered = takesSplits ? offeredAll : preferWholeChapters(offeredAll, held);
-  return { ...compareOffering(offered, held), held: held.size };
+  // Counted against everything the source lists, because that is what the downloader now
+  // takes. Filtering here to match an old whole-only rule is how this column came to
+  // promise a different number of chapters from the one the queue asked for.
+  return { ...compareOffering(offeredAll, held), held: held.size };
 }
 
 export async function mangaDetail(mangaId: number, seriesId?: number): Promise<{

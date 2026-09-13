@@ -775,15 +775,14 @@ test("a series whose source only publishes halves keeps taking them", { skip: !h
 });
 
 /**
- * A folder must not be protected by a decision we made.
+ * A folder holding a chapter the library lacks is not redundant, whatever its number.
  *
- * Deleting the redundant part-numbered chapters left their files in the legacy folders,
- * and "every chapter in this folder is held" then read as false: 33 of the 37 folders kept
- * back were kept because of decimals we had deliberately removed, so they could never be
- * pruned. A series that takes splits is the exception, since for it a missing decimal is a
- * real gap.
+ * This asserted the opposite: that a decimal beside a held whole was accounted for, so
+ * the folder could be pruned. That reasoning cost real content. The Golden Experience
+ * Point is published as 10, 10-1 and 10-2, and 10-1 and 10-2 share none of their 37 pages
+ * with chapter 10, so a folder holding them holds chapters and deleting it loses them.
  */
-test("a decimal deleted on purpose does not protect its legacy folder", { skip: !haveDb }, async () => {
+test("a folder holding a part the library lacks is not redundant", { skip: !haveDb }, async () => {
   const { setLink, redundantFolders } = await import("../src/adopt.js");
   const { mkdirSync: mk, writeFileSync: wf } = await import("node:fs");
   const p = db();
@@ -813,10 +812,13 @@ test("a decimal deleted on purpose does not protect its legacy folder", { skip: 
   const whole = report.find((f) => f.path === wholeDir)!;
   const split = report.find((f) => f.path === splitDir)!;
 
-  assert.equal(whole.heldAll, true,
-    "1.1 was deleted deliberately, so it is accounted for and must not hold the folder back");
+  // Both folders hold 1.1 and neither library has it, so neither folder is redundant.
+  // Whether 1.1 duplicates chapter 1 is a question about their pages, and deleting the
+  // only copy of it is not how you find out.
+  assert.equal(whole.heldAll, false,
+    "1.1 is a chapter this folder has and the library does not, so the folder stays");
   assert.equal(split.heldAll, false,
-    "a series that takes splits genuinely lacks 1.1, so its folder is still needed");
+    "and that is true whether or not the series is marked as taking splits");
 
   for (const t of [WHOLE, SPLIT]) await p.query("DELETE FROM series WHERE title = $1", [t]);
 });
@@ -875,7 +877,14 @@ test("forcing a source-less refresh moves to another page and still fills the sy
   await p.query("DELETE FROM series WHERE id = $1", [sid]);
 });
 
-test("adoption does not offer back the decimals we deleted", { skip: !haveDb }, async () => {
+/**
+ * Adoption offers every chapter on disk that the library lacks.
+ *
+ * It used to withhold a part whose whole chapter was held, which would refuse to adopt
+ * real chapters: 10-1 and 10-2 of The Golden Experience Point share no pages with chapter
+ * 10 and are the story.
+ */
+test("adoption offers a part the library does not hold", { skip: !haveDb }, async () => {
   const { setLink, findOnDisk } = await import("../src/adopt.js");
   const { mkdirSync: mk, writeFileSync: wf } = await import("node:fs");
   const p = db();
@@ -890,18 +899,13 @@ test("adoption does not offer back the decimals we deleted", { skip: !haveDb }, 
   }
   const dir = join(legacyRoot, "Reoffer_Test_Series");
   mk(dir, { recursive: true });
-  // 1.1 was deleted on purpose; 3 is genuinely new.
+  // 1.1 may be a split of chapter 1 or a chapter of its own; 3 is plainly new.
   for (const f of ["Chapter 1.cbz", "Chapter 1.1.cbz", "Chapter 3.cbz"]) wf(join(dir, f), Buffer.from(f));
   await setLink(sid, dir, "linked");
 
-  let offers = [...(await findOnDisk(sid)).sources[0]!.offers.keys()].sort((a, b) => a - b);
-  assert.deepEqual(offers, [3],
-    "only the genuinely new chapter is offered: re-adopting 1.1 would undo the prune");
-
-  // A series that takes splits wants it back.
-  await p.query("UPDATE series SET take_splits = true WHERE id = $1", [sid]);
-  offers = [...(await findOnDisk(sid)).sources[0]!.offers.keys()].sort((a, b) => a - b);
-  assert.deepEqual(offers, [1.1, 3], "unless the series takes splits, in which case it is wanted");
+  const offers = [...(await findOnDisk(sid)).sources[0]!.offers.keys()].sort((a, b) => a - b);
+  assert.deepEqual(offers, [1.1, 3],
+    "both are chapters the library lacks, and a number cannot say which is a duplicate");
 
   await p.query("DELETE FROM series WHERE id = $1", [sid]);
 });

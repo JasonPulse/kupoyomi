@@ -26,40 +26,6 @@ export const wholesCovered = (nums: Iterable<number>): Set<number> =>
   new Set([...nums].map(Math.trunc));
 
 /**
- * What to take from a source, given what is already held.
- *
- * A decimal is usually one chapter split by a release group, so taking 25.1 and 25.2
- * alongside 25 means reading the same pages twice. Refusing every decimal on sight is a
- * different rule and a worse one: it drops chapters that exist in no other form.
- *
- * A part is refused only when there is a whole to prefer, meaning the source offers that
- * whole or we already hold it. Otherwise the parts are the chapter.
- */
-export const preferWholeChapters = (offered: number[], held: Set<number>): number[] => {
-  const wholes = new Set(offered.filter((n) => Number.isInteger(n)));
-  return offered.filter((n) => Number.isInteger(n)
-    || (!wholes.has(Math.trunc(n)) && !held.has(Math.trunc(n))));
-};
-
-/**
- * Is this part made redundant by a whole chapter already on disk.
- *
- * Holding whole 8 means 8.1 and 8.2 are the same pages again. Adoption uses this to leave
- * such files alone rather than counting them as something a folder still owes.
- */
-export const supersededByWhole = (n: number, held: Set<number>): boolean =>
-  !Number.isInteger(n) && held.has(Math.trunc(n));
-
-/**
- * Whole chapters we hold only as parts.
- *
- * Holding 8.1 and 8.2 is holding chapter 8, so fetching the whole 8 fetches those pages a
- * third time. It was queued for exactly that and kept failing against a source that 500s.
- */
-export const wholesHeldAsParts = (held: Iterable<number>): Set<number> =>
-  new Set([...held].filter((n) => !Number.isInteger(n)).map(Math.trunc));
-
-/**
  * Whole chapters missing between the first and last a list covers.
  *
  * Only whole numbers are reported. A source's decimals are its own invention, one site
@@ -86,16 +52,6 @@ export const isPart = (n: number): boolean => !Number.isInteger(n);
 /** The whole chapters a set of parts belongs to, each listed once. */
 export const basesOf = (nums: Iterable<number>): number[] =>
   [...new Set([...nums].filter(isPart).map(Math.trunc))];
-
-/**
- * Is this whole chapter already covered by parts on disk.
- *
- * The mirror of supersededByWhole, and the reason it lives here too: read in the other
- * direction it is the same rule, and the two drifting apart is exactly the failure this
- * module exists to prevent.
- */
-export const supersededByParts = (n: number, heldAsParts: Set<number>): boolean =>
-  Number.isInteger(n) && heldAsParts.has(n);
 
 /**
  * The rule in SQL, for statements that cannot call into this module.

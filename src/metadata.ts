@@ -232,6 +232,65 @@ export async function refreshMetadata(
 
 
 /**
+ * Refreshing in the background, because it cannot be done inside a request.
+ *
+ * refreshMetadata resolves the series against its source, which searches up to six query
+ * forms at 45 seconds each before it even asks for the cover. The button awaited all of
+ * that and then redirected, so the browser sat on a dead request for minutes and gave up.
+ * Nothing was wrong with the work; it was being done in the wrong place.
+ *
+ * The job runs detached and records what it found. The page asks for the answer.
+ */
+export type RefreshState = {
+  running: boolean;
+  /** What it found, once it has finished. */
+  note: string;
+  startedAt: number;
+};
+const refreshes = new Map<number, RefreshState>();
+
+export const refreshState = (seriesId: number): RefreshState | undefined => refreshes.get(seriesId);
+
+/**
+ * Starts a refresh and returns at once. A second press while one is running is ignored
+ * rather than queued: the answer would be the same and the source has been asked enough.
+ */
+export function startRefresh(seriesId: number): RefreshState {
+  const running = refreshes.get(seriesId);
+  if (running?.running) return running;
+  const state: RefreshState = { running: true, note: "", startedAt: Date.now() };
+  refreshes.set(seriesId, state);
+
+  void (async () => {
+    const p = db();
+    const coverOf = async (): Promise<string | null> => (await p.query<{ c: string | null }>(
+      "SELECT cover_path AS c FROM series WHERE id = $1", [seriesId])).rows[0]?.c ?? null;
+    const hash = (f: string | null): string | null => {
+      if (!f) return null;
+      try { return createHash("sha1").update(readFileSync(f)).digest("hex"); } catch { return null; }
+    };
+    try {
+      const before = hash(await coverOf());
+      const got = await refreshMetadata(seriesId, { force: true });
+      const after = hash(await coverOf());
+      state.note = before !== after ? "cover replaced"
+        : got.cover ? "same image again: this is the best the source and the files offer, so use pick a cover"
+        : "no cover found at all";
+    } catch (err) {
+      // Said out loud. This used to be swallowed, so a series that never got a cover on
+      // the way in gave no sign of why, and the only clue was the scheduled pass filling
+      // it in hours later.
+      state.note = `refresh failed: ${err instanceof Error ? err.message.slice(0, 120) : String(err)}`;
+      console.log(`  metadata refresh for series ${seriesId} failed: ${
+        err instanceof Error ? err.message.slice(0, 140) : String(err)}`);
+    } finally {
+      state.running = false;
+    }
+  })();
+  return state;
+}
+
+/**
  * Fills in covers and synopses for series that have none. Paced, because each one is a
  * search plus a fetch against a real site, and there is no hurry.
  *

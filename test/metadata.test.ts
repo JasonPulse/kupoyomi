@@ -909,3 +909,40 @@ test("adoption offers a part the library does not hold", { skip: !haveDb }, asyn
 
   await p.query("DELETE FROM series WHERE id = $1", [sid]);
 });
+
+/**
+ * The refresh runs on the server and the page asks for the answer.
+ *
+ * The button awaited refreshMetadata inside the POST. Resolving a series against its
+ * source searches up to six query forms at 45 seconds each before it asks for a cover, so
+ * the request stayed open for minutes and the browser gave up on it. The work was fine;
+ * it was being done where nothing could wait for it.
+ */
+test("starting a refresh returns at once and reports when it finishes", { skip: !haveDb }, async () => {
+  const { startRefresh, refreshState } = await import("../src/metadata.js");
+  const p = db();
+  const TITLE = "Background Refresh Series";
+  await p.query("DELETE FROM series WHERE title = $1", [TITLE]);
+  const sid = (await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [TITLE])).rows[0]!.id;
+
+  // No binding and no files, so the work itself finds nothing. What matters is that the
+  // call comes back immediately rather than waiting for the source.
+  const began = Date.now();
+  const first = startRefresh(sid);
+  assert.ok(Date.now() - began < 200, "the caller is not made to wait for the source");
+  assert.equal(first.running, true, "and it says it is working");
+
+  // Pressing again while it runs is the same job, not a second one.
+  assert.equal(startRefresh(sid), first, "a second press does not ask the source twice");
+
+  // It finishes on its own and leaves an answer behind for the page to collect.
+  for (let i = 0; i < 100 && refreshState(sid)?.running; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  const done = refreshState(sid)!;
+  assert.equal(done.running, false, "it finished");
+  assert.ok(done.note.length > 0, `and said what happened: ${done.note}`);
+
+  await p.query("DELETE FROM series WHERE title = $1", [TITLE]);
+});

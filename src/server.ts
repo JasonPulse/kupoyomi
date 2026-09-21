@@ -19,11 +19,6 @@ const sniffImage = (p: string): string => {
   return "image/jpeg";
 };
 
-/** Content hash of a file, or null if it cannot be read. Used to tell a refresh that
- *  changed something from one that legitimately did not. */
-const hashFile = (p: string): string | null => {
-  try { return createHash("sha1").update(readFileSync(p)).digest("hex"); } catch { return null; }
-};
 
 /**
  * Streams a file, answering 404 if it cannot be opened.
@@ -85,7 +80,7 @@ import { removeSeries } from "./remove.js";
 import { extensionsPage, setExtension } from "./ui/extensions.js";
 import { ASSETS } from "./ui/assets.js";
 import { serveBundle } from "./ui/pbrepo.js";
-import { refreshMetadata } from "./metadata.js";
+import { startRefresh, refreshState } from "./metadata.js";
 import { listSeries, getSeries, getChapters, getPages, getPage, setProgress, setProgressUpTo, clearProgress, lastReadChapter, bindingAvailability } from "./pbapi.js";
 import { createReadStream } from "node:fs";
 import { scanWanted, reclaimStuck } from "./fetch.js";
@@ -379,6 +374,23 @@ export async function serve(): Promise<void> {
         return html(browseSource(decodeURIComponent(b[1]!),
           url.searchParams.get("type") ?? "POPULAR", url.searchParams.getAll("f")));
       }
+      // What a running refresh has found, for the page that started it. ver is the
+      // metadata timestamp, which the cover url carries so a replaced image is fetched
+      // rather than served from the last hour's cache.
+      const mstat = /^\/api\/metadata\/(\d+)$/.exec(path);
+      if (mstat) {
+        const sid = Number(mstat[1]);
+        db().query<{ description: string | null; cover: boolean; ver: string }>(
+          `SELECT description, cover_path IS NOT NULL AS cover,
+                  COALESCE(extract(epoch from metadata_at)::bigint, 0)::text AS ver
+             FROM series WHERE id = $1`, [sid])
+          .then((r) => {
+            const st = refreshState(sid);
+            send(200, { running: st?.running ?? false, note: st?.note ?? "", ...r.rows[0] });
+          })
+          .catch((e: unknown) => send(503, { error: e instanceof Error ? e.message : String(e) }));
+        return;
+      }
       const bav = /^\/api\/binding\/(\d+)$/.exec(path);
       if (bav) {
         bindingAvailability(Number(bav[1])).then((d) => send(200, d))
@@ -395,7 +407,10 @@ export async function serve(): Promise<void> {
       const rem = /^\/series\/(\d+)\/remove$/.exec(path);
       if (rem) return html(confirmRemovalPage(Number(rem[1])));
       const m = /^\/series\/(\d+)$/.exec(path);
-      if (m) return html(seriesPage(Number(m[1]), url.searchParams.get("said") ?? undefined));
+      if (m) {
+        return html(seriesPage(Number(m[1]), url.searchParams.get("said") ?? undefined,
+          url.searchParams.get("refreshing") === "1"));
+      }
     }
 
     if (req.method === "POST") {
@@ -437,27 +452,14 @@ export async function serve(): Promise<void> {
           return `/series/${sid}`;
         }
         const meta = /^\/series\/(\d+)\/metadata$/.exec(path);
-        // Pressing the button means "give me a different answer", so it forces. And it
-        // reports back: a refresh that legitimately finds the same image looked exactly
-        // like one that failed, which is why the button felt dead.
+        // Started, not awaited. Resolving a series against its source searches up to six
+        // query forms at 45 seconds each before it asks for a cover, so awaiting it held
+        // the request open for minutes and the browser gave up on it. The page asks for
+        // the answer instead.
         if (meta) {
           const sid = Number(meta[1]);
-          const before = (await db().query<{ p: string | null }>(
-            "SELECT cover_path AS p FROM series WHERE id = $1", [sid])).rows[0]?.p ?? null;
-          const beforeHash = before ? hashFile(before) : null;
-          let note: string;
-          try {
-            const got = await refreshMetadata(sid, { force: true });
-            const after = (await db().query<{ p: string | null }>(
-              "SELECT cover_path AS p FROM series WHERE id = $1", [sid])).rows[0]?.p ?? null;
-            const afterHash = after ? hashFile(after) : null;
-            note = beforeHash !== afterHash ? "cover replaced"
-              : got.cover ? "same image again: this is the best the source and the files offer, so use pick a cover"
-              : "no cover found at all";
-          } catch (e) {
-            note = `refresh failed: ${e instanceof Error ? e.message.slice(0, 90) : String(e)}`;
-          }
-          return `/series/${sid}?said=${encodeURIComponent(note)}`;
+          startRefresh(sid);
+          return `/series/${sid}?refreshing=1`;
         }
         if (path === "/queue/retry") {
           const { retryFailed, fetchWanted: fetchNow } = await import("./fetch.js");

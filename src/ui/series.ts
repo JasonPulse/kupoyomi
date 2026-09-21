@@ -3,7 +3,7 @@ import { esc, page } from "./layout.js";
 import { fmt, ago } from "../held.js";
 import { findGaps } from "../gaps.js";
 
-export async function seriesPage(id: number, said?: string): Promise<string> {
+export async function seriesPage(id: number, said?: string, refreshing = false): Promise<string> {
   const p = db();
   const today = (await p.query<{ d: string }>("SELECT current_date::text AS d")).rows[0]?.d ?? "";
   const s = (await p.query<{ id: number; title: string; folder: string; status: string; muted: boolean; stalled_since: string | null; description: string | null; cover_path: string | null; take_splits: boolean; ver: string }>(
@@ -105,7 +105,7 @@ export async function seriesPage(id: number, said?: string): Promise<string> {
        <div class="meta"><b>${esc(said)}</b></div></div>` : ""}
      <div class="card">
        <div class="hero">
-       ${s.cover_path ? `<img src="/series/${id}/cover?v=${s.ver}" alt="">` : `<img alt="">`}
+       ${s.cover_path ? `<img id="cover" src="/series/${id}/cover?v=${s.ver}" alt="">` : `<img id="cover" alt="">`}
        <div style="min-width:0">
        <div class="title">${esc(s.title)}${s.muted ? ' <span class="badge">muted</span>' : ""}${
          s.status === "COMPLETED" ? ' <span class="badge">finished</span>' : ""}${
@@ -113,7 +113,7 @@ export async function seriesPage(id: number, said?: string): Promise<string> {
        <div class="meta">${chapters.length} chapters, ${fmt(held.at(-1) ?? null)} to ${fmt(held[0] ?? null)}
          &middot; folder <span class="dim">${esc(s.folder)}</span>${
          ""}</div>
-       ${s.description ? `<div class="syn">${esc(s.description.slice(0, 1400))}</div>` : '<div class="syn dim">no synopsis yet</div>'}
+       ${s.description ? `<div class="syn" id="syn">${esc(s.description.slice(0, 1400))}</div>` : '<div class="syn dim" id="syn">no synopsis yet</div>'}
        </div></div>
        <table style="margin-top:12px" id="bindings">
          <tr><th>source</th><th>chapters</th><th>range</th>
@@ -134,7 +134,8 @@ export async function seriesPage(id: number, said?: string): Promise<string> {
            queued but not carried by the new source leave the queue.</span></div>
        <div class="actions">
          <form method="post" action="/series/${id}/scan"><button class="weak" type="submit">check for new chapters</button></form>
-         <form method="post" action="/series/${id}/metadata"><button class="weak" type="submit">refresh cover &amp; synopsis</button></form>
+         <form method="post" action="/series/${id}/metadata" id="metaform" style="display:inline"><button class="weak" type="submit">refresh cover &amp; synopsis</button></form>
+         <span class="hint" id="metanote"></span>
          <a href="/series/${id}/pick-cover" style="text-decoration:none"><button class="weak" type="button">pick a cover</button></a>
          <form method="post" action="/series/${id}/read" style="display:inline">
            <input type="hidden" name="chapter" value="${fmt(held[0] ?? null)}">
@@ -270,7 +271,52 @@ export async function seriesPage(id: number, said?: string): Promise<string> {
        });
      });
      </script>
-     <script>var SERIES_ID = ${id};</script>
+     <script>var SERIES_ID = ${id}; var REFRESHING = ${refreshing ? "true" : "false"};</script>
+     <script>
+     // The refresh runs on the server and this asks for the answer. Awaiting it inside the
+     // POST held the request open for minutes, because resolving a series searches up to
+     // six query forms at 45 seconds each, and the browser gave up long before it finished.
+     (function () {
+       var form = document.getElementById('metaform');
+       var note = document.getElementById('metanote');
+       function say(t, cls) { if (note) { note.textContent = t; note.className = 'hint ' + (cls || ''); } }
+       function poll(tries) {
+         fetch('/api/metadata/' + SERIES_ID).then(function (r) { return r.json(); }).then(function (d) {
+           if (d.running) {
+             if (tries > 300) { say('still working. It is running on the server, so leaving this page is fine', 'dim'); return; }
+             say('asking the source' + new Array((tries % 4) + 1).join('.'), 'dim');
+             setTimeout(function () { poll(tries + 1); }, 2000);
+             return;
+           }
+           say(d.note || 'done', /fail|no cover/.test(d.note || '') ? 'bad' : 'rec');
+           // Swapped in place. The version is the metadata timestamp, so a replaced image
+           // is fetched rather than served from the last hour of cache.
+           var img = document.getElementById('cover');
+           if (img && d.cover) img.src = '/series/' + SERIES_ID + '/cover?v=' + d.ver;
+           var syn = document.getElementById('syn');
+           if (syn && d.description) { syn.textContent = d.description.slice(0, 1400); syn.className = 'syn'; }
+           var b = form && form.querySelector('button');
+           if (b) { b.disabled = false; b.textContent = 'refresh cover & synopsis'; }
+         }).catch(function () { say('could not reach the server', 'bad'); });
+       }
+       if (form) {
+         form.addEventListener('submit', function (ev) {
+           ev.preventDefault();
+           var b = form.querySelector('button');
+           if (b) { b.disabled = true; b.textContent = 'refreshing'; }
+           say('asking the source', 'dim');
+           fetch(form.action, { method: 'POST' }).then(function () { poll(0); })
+             .catch(function () { say('could not start the refresh', 'bad'); });
+         });
+       }
+       // Arriving back from a press made before this page loaded.
+       if (REFRESHING) {
+         var b0 = form && form.querySelector('button');
+         if (b0) { b0.disabled = true; b0.textContent = 'refreshing'; }
+         poll(0);
+       }
+     })();
+     </script>
      <div class="card"><div class="title">Chapters</div>
        <div class="actions" style="margin:0 0 10px">
          <form method="post" action="/series/${id}/read">

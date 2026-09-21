@@ -39,11 +39,14 @@ export async function useSource(
  */
 export function resyncAfterSwitch(seriesId: number): void {
   void (async () => {
-    const [{ scanWanted }, { refreshMetadata }] = await Promise.all([
+    const [{ scanWanted }, { startRefresh }] = await Promise.all([
       import("./fetch.js"), import("./metadata.js"),
     ]);
     await scanWanted({ seriesId }).catch((e: unknown) =>
       console.log(`rescan of series ${seriesId} failed: ${e instanceof Error ? e.message : String(e)}`));
-    await refreshMetadata(seriesId, { force: true }).catch(() => undefined);
+    // The same tracked job the button starts, so a series added without a cover says why
+    // instead of silently waiting for the scheduled pass hours later. Its failure used to
+    // be swallowed outright.
+    startRefresh(seriesId);
   })();
 }

@@ -110,13 +110,16 @@ test("a series with no source binding still gets a cover and a synopsis", { skip
     "the ComicInfo summary is recovered and its entities decoded");
 });
 
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64");
 test("an existing cover.jpg is adopted rather than overwritten", { skip: !haveDb }, async () => {
   const cover = join(DIR, "cover.jpg");
-  writeFileSync(cover, Buffer.from("KOMF-LEFT-THIS"));
+  writeFileSync(cover, TINY_PNG);
   await db().query("UPDATE series SET cover_path = NULL WHERE id = $1", [seriesId]);
 
   await refreshMetadata(seriesId);
-  assert.deepEqual(readFileSync(cover), Buffer.from("KOMF-LEFT-THIS"),
+  assert.deepEqual(readFileSync(cover), TINY_PNG,
     "a cover already on disk is real art and must not be clobbered");
 });
 
@@ -656,15 +659,18 @@ test("a forced refresh replaces a cover, and an unforced one does not", { skip: 
   await p.query("INSERT INTO chapter (series_id, chapter_number, file_path) VALUES ($1,1,$2)", [sid, file]);
 
   // A cover already on disk, standing in for the credits page these series ended up with.
-  wf(join(dir, "cover.jpg"), Buffer.from("WRONG-COVER"));
+  // A real image, because an unreadable one is now refused rather than adopted: a source
+  // once answered a thumbnail request with a 403 page and that HTML became the artwork.
+  const WRONG = jpegOf(1000, 1400, "WRONG-COVER");
+  wf(join(dir, "cover.jpg"), WRONG);
   await p.query("UPDATE series SET cover_path = $2 WHERE id = $1", [sid, join(dir, "cover.jpg")]);
 
   await refreshMetadata(sid);
-  assert.deepEqual(rf(join(dir, "cover.jpg")), Buffer.from("WRONG-COVER"),
+  assert.deepEqual(rf(join(dir, "cover.jpg")), WRONG,
     "without force the existing cover stands, which is right for the scheduled pass");
 
   await refreshMetadata(sid, { force: true });
-  assert.notDeepEqual(rf(join(dir, "cover.jpg")), Buffer.from("WRONG-COVER"),
+  assert.notDeepEqual(rf(join(dir, "cover.jpg")), WRONG,
     "with force it is replaced, which is what pressing the button means");
 
   // And a chosen page wins outright, since shape cannot tell a cover from a panel.
@@ -943,6 +949,47 @@ test("starting a refresh returns at once and reports when it finishes", { skip: 
   const done = refreshState(sid)!;
   assert.equal(done.running, false, "it finished");
   assert.ok(done.note.length > 0, `and said what happened: ${done.note}`);
+
+  await p.query("DELETE FROM series WHERE title = $1", [TITLE]);
+});
+
+/**
+ * A 200 is not proof of an image.
+ *
+ * The host behind "+99 Reinforced Wooden Stick" answered a thumbnail request with ninety
+ * four bytes reading "<html><body><h1>403 Forbidden". r.ok was true, so those bytes were
+ * written out as cover.jpg and served to the library as the artwork. Worse, the next
+ * refresh found a cover.jpg already in the folder and adopted it on sight, so the 403 page
+ * survived every attempt to replace it.
+ */
+test("a thumbnail that is not an image is refused, and not adopted later", { skip: !haveDb }, async () => {
+  const { imageSize } = await import("../src/imgsize.js");
+  const { refreshMetadata } = await import("../src/metadata.js");
+  const { mkdirSync, writeFileSync, readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const p = db();
+
+  const FORBIDDEN = Buffer.from("<html><body><h1>403 Forbidden</h1>\nRequest forbidden.\n</body></html>");
+  assert.equal(imageSize(FORBIDDEN), null, "the guard can tell this is not an image");
+
+  const TITLE = "Not An Image Series";
+  await p.query("DELETE FROM series WHERE title = $1", [TITLE]);
+  const sid = (await p.query<{ id: number }>(
+    "INSERT INTO series (title, folder) VALUES ($1,$1) RETURNING id", [TITLE])).rows[0]!.id;
+
+  // The damage already on disk: a 403 page sitting where the cover belongs.
+  const dir = join(libraryRoot, TITLE);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "cover.jpg"), FORBIDDEN);
+
+  // No binding, so this takes the local path, which is the one that used to adopt it.
+  await refreshMetadata(sid, {});
+  const cover = (await p.query<{ c: string | null }>(
+    "SELECT cover_path AS c FROM series WHERE id = $1", [sid])).rows[0]!.c;
+  if (cover !== null) {
+    assert.ok(imageSize(readFileSync(cover)) !== null,
+      "whatever it settled on is an image, not the 403 page it found sitting there");
+  }
 
   await p.query("DELETE FROM series WHERE title = $1", [TITLE]);
 });

@@ -9,14 +9,11 @@ import { createHash } from "node:crypto";
 const sniffImage = (p: string): string => {
   try {
     const fd = openSync(p, "r");
-    const head = Buffer.alloc(12);
-    readSync(fd, head, 0, 12, 0);
+    const head = Buffer.alloc(16);
+    readSync(fd, head, 0, 16, 0);
     closeSync(fd);
-    if (head.toString("ascii", 0, 4) === "RIFF" && head.toString("ascii", 8, 12) === "WEBP") return "image/webp";
-    if (head[0] === 0x89 && head.toString("ascii", 1, 4) === "PNG") return "image/png";
-    if (head.toString("ascii", 0, 3) === "GIF") return "image/gif";
-  } catch { /* fall through to jpeg */ }
-  return "image/jpeg";
+    return imageType(head) ?? "image/jpeg";
+  } catch { return "image/jpeg"; }
 };
 
 
@@ -87,6 +84,7 @@ import { scanWanted, reclaimStuck } from "./fetch.js";
 import { startScheduler, state as schedState, checkStalled } from "./schedule.js";
 import { maxAttempts, suwayomiHttpBase } from "./config.js";
 import { resyncAfterSwitch } from "./sources.js";
+import { imageType } from "./imgsize.js";
 
 /**
  * Suwayomi runs on emptyDir, so on every cold start it comes up with no extensions

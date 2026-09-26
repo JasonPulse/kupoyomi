@@ -1,4 +1,29 @@
 /**
+ * What kind of image this is, from its first bytes, or null if it is not one.
+ *
+ * A source answered a thumbnail request with ninety-four bytes of "403 Forbidden" HTML
+ * under a 200, and those bytes were written out as cover.jpg and served as the artwork.
+ * A status code says the request arrived, not that the answer is a picture.
+ *
+ * Every format the library actually stores is listed, which matters: imageSize below
+ * reads only JPEG and PNG, and using it as the test would have rejected the WebP covers
+ * several series already have.
+ */
+export function imageType(buf: Buffer): string | null {
+  if (buf.length < 12) return null;
+  if (buf.readUInt32BE(0) === 0x89504e47) return "image/png";
+  if (buf[0] === 0xff && buf[1] === 0xd8) return "image/jpeg";
+  if (buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+  if (buf.toString("ascii", 0, 3) === "GIF") return "image/gif";
+  // ISO base media: AVIF and HEIC both announce themselves in the ftyp brand.
+  if (buf.toString("ascii", 4, 8) === "ftyp"
+    && /avif|avis|heic|heix|mif1/.test(buf.toString("ascii", 8, 12))) return "image/avif";
+  return null;
+}
+
+export const isImage = (buf: Buffer): boolean => imageType(buf) !== null;
+
+/**
  * Pixel dimensions of an image, read from its header without decoding it.
  *
  * Exists because "page one" is not always a usable cover. A webtoon chapter is a single

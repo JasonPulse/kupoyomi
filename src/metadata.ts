@@ -1,11 +1,11 @@
-import { writeFileSync, mkdirSync, renameSync, existsSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, renameSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { config, suwayomiHttpBase } from "./config.js";
 import { db } from "./db.js";
 import { gql, primeManga } from "./suwayomi.js";
 import { resolveManga } from "./match.js";
 import { listEntries, pageEntries, readEntry } from "./unzip.js";
-import { imageSize, coverScore } from "./imgsize.js";
+import { imageSize, coverScore, isImage } from "./imgsize.js";
 
 
 /**
@@ -26,6 +26,11 @@ import { imageSize, coverScore } from "./imgsize.js";
  * Two signals have to agree, because a genuine synopsis can mention a title or a rating
  * in passing and should not be thrown away for it.
  */
+/** Is this path a file we can actually show as a cover. */
+const isImageFile = (path: string): boolean => {
+  try { return isImage(readFileSync(path)); } catch { return false; }
+};
+
 export function looksLikeSiteCopy(text: string): boolean {
   const t = text.toLowerCase();
   const tells = [
@@ -106,9 +111,11 @@ async function localMetadata(
 
   let cover: string | null = null;
   // A cover.jpg already sitting in the folder is either ours from a previous run or one
-  // komf left behind. Either way it is a real cover, so adopt it rather than redo it --
-  // unless the caller is explicitly replacing it, which is the whole point of asking.
-  if (wantCover && !opts.force && existsSync(`${dir}/cover.jpg`)) cover = `${dir}/cover.jpg`;
+  // komf left behind, so it is adopted rather than redone, unless the caller is
+  // explicitly replacing it. It is checked first: a source that answered a thumbnail
+  // request with a 403 page left ninety-four bytes of HTML called cover.jpg, and adopting
+  // that on sight is how it survived every later refresh.
+  if (wantCover && !opts.force && isImageFile(`${dir}/cover.jpg`)) cover = `${dir}/cover.jpg`;
 
   let description: string | null = null;
   if (first) {
@@ -201,7 +208,18 @@ export async function refreshMetadata(
     try {
       const r = await fetch(`${suwayomiHttpBase()}${d.thumbnailUrl}`);
       if (r.ok) {
-        coverPath = writeCover(`${config.libraryRoot}/${s.folder}`, Buffer.from(await r.arrayBuffer()));
+        const body = Buffer.from(await r.arrayBuffer());
+        // 200 is not proof of an image. The host behind "+99 Reinforced Wooden Stick"
+        // answered with ninety-four bytes reading "<html><body><h1>403 Forbidden", and
+        // r.ok was true, so that HTML was written out as cover.jpg and served to the
+        // library as the artwork. imageSize parses the header, so anything that is not
+        // actually an image is refused and the page-based cover is used instead.
+        if (isImage(body)) {
+          coverPath = writeCover(`${config.libraryRoot}/${s.folder}`, body);
+        } else {
+          console.log(`  ${s.title.slice(0, 40)}: the source's thumbnail is not an image `
+            + `(${body.length} bytes, ${JSON.stringify(body.subarray(0, 40).toString("utf8"))}), using the files instead`);
+        }
       }
     } catch { /* a missing cover is not worth failing the refresh over */ }
   }

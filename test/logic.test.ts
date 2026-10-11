@@ -442,3 +442,38 @@ test("no module rewrites a rule that has a shared implementation", async () => {
   }
   assert.deepEqual(offenders, [], `\n  ${offenders.join("\n  ")}`);
 });
+
+/**
+ * Browsing a source must show each series once.
+ *
+ * Paging a listing is not the same as paging a stable list. Bbato's popular listing
+ * reorders between requests, so page 2 came back holding 12 of page 1's 20 entries, and
+ * with three pages fetched the page showed the same series two and three times over
+ * while scrolling.
+ */
+test("a browse listing that repeats across pages is sent once", () => {
+  // The shape streamBrowse applies: a seen set across pages, and a stop once a page
+  // brings nothing new.
+  const pages = [
+    [1, 2, 3, 4],
+    [3, 4, 5, 6],   // overlaps page 1, which is what Bbato does
+    [5, 6],         // entirely old by now, so paging stops here
+    [9, 9, 9],      // never reached
+  ];
+  const seen = new Set<number>();
+  const sent: number[] = [];
+  let pagesRead = 0;
+  for (const page of pages) {
+    pagesRead++;
+    let fresh = 0;
+    for (const id of page) {
+      if (seen.has(id)) continue;
+      seen.add(id); fresh++; sent.push(id);
+    }
+    if (page.length > 0 && fresh === 0) break;
+  }
+
+  assert.deepEqual(sent, [1, 2, 3, 4, 5, 6], "every series once, in the order first seen");
+  assert.equal(sent.length, new Set(sent).size, "and nothing twice");
+  assert.equal(pagesRead, 3, "it stops once a page adds nothing, rather than asking again");
+});

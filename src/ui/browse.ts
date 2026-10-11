@@ -244,17 +244,29 @@ export async function streamBrowse(
     send("start", { source: name, kind });
 
     let total = 0;
+    // Paging a listing is not the same as paging a stable list. Bbato's popular listing
+    // reorders between requests, so page 2 came back with 12 of page 1's 20 entries and
+    // the page showed the same series two and three times over while scrolling. Each
+    // entry is sent once, however many pages it turns up on.
+    const seen = new Set<number>();
     for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
       const r = await gql<{ fetchSourceManga: { hasNextPage: boolean; mangas: Array<{ id: number; title: string; url: string; thumbnailUrl: string | null }> } }>(
         `mutation($s:LongString!,$t:FetchSourceMangaType!,$p:Int!,$f:[FilterChangeInput!]){
            fetchSourceManga(input:{source:$s,type:$t,page:$p,filters:$f}){ hasNextPage mangas{ id title url thumbnailUrl } } }`,
         { s: sourceId, t: kind, p: pageNo, f: parsed });
+      let fresh = 0;
       for (const m of r.fetchSourceManga.mangas) {
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        fresh++;
         send("hit", { sourceId, sourceName: name, mangaId: m.id, title: m.title, url: m.url, thumb: `/thumb/${m.id}` });
         total++;
       }
       send("page", { page: pageNo, total, more: r.fetchSourceManga.hasNextPage });
       if (!r.fetchSourceManga.hasNextPage) break;
+      // A page that is entirely things already shown means the source is handing back the
+      // same listing whatever page is asked for, so asking again only repeats it.
+      if (r.fetchSourceManga.mangas.length > 0 && fresh === 0) break;
     }
     send("done", { total, source: name, kind });
   } catch (err) {

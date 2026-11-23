@@ -477,3 +477,21 @@ test("a browse listing that repeats across pages is sent once", () => {
   assert.equal(sent.length, new Set(sent).size, "and nothing twice");
   assert.equal(pagesRead, 3, "it stops once a page adds nothing, rather than asking again");
 });
+
+const { readingList } = await import("../src/chapters.js");
+
+test("a whole chapter held beside its split release is listed once, as the whole", () => {
+  // Angel Next Door chapter 1: 57 pages whole, 64 across 1.1 to 1.5, the same story twice.
+  assert.deepEqual(readingList([1, 1.1, 1.2, 1.3, 1.4, 1.5, 2]),
+    [{ number: 1, files: [1] }, { number: 2, files: [2] }]);
+});
+
+test("parts with no whole are read back to back as one chapter", () => {
+  assert.deepEqual(readingList([7.2, 7.1, 7.3, 8]),
+    [{ number: 7, files: [7.1, 7.2, 7.3] }, { number: 8, files: [8] }]);
+});
+
+test("a lone extra keeps its own entry, beside a whole or not", () => {
+  assert.deepEqual(readingList([39, 39.5, 41.5]),
+    [{ number: 39, files: [39] }, { number: 39.5, files: [39.5] }, { number: 41.5, files: [41.5] }]);
+});

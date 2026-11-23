@@ -117,6 +117,25 @@ export const SOURCE_SEARCH = `mutation($src:LongString!,$q:String!){
   fetchSourceManga(input:{source:$src,type:SEARCH,query:$q,page:1}){
     mangas{ id title url thumbnailUrl } } }`;
 
+/**
+ * Whether a source's host is answering, as null for yes and the reason for no.
+ *
+ * The first page of its popular list, because every source implements it and it needs no
+ * title to search for. An empty list counts as down: it is what a site that moved or
+ * changed its markup looks like through an extension, and it is exactly what Bbato
+ * returned once its search began answering 404.
+ */
+export async function sourceUnreachable(sourceId: string): Promise<string | null> {
+  try {
+    const r = await gql<{ fetchSourceManga: { mangas: Array<{ id: number }> } }>(
+      `mutation($src:LongString!){ fetchSourceManga(input:{source:$src,type:POPULAR,page:1}){ mangas{ id } } }`,
+      { src: sourceId });
+    return r.fetchSourceManga.mangas.length > 0 ? null : "its popular list came back empty";
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
 export const mangaChapters = async (id: number): Promise<Chapter[]> =>
   (await gql<{ manga: { chapters: { nodes: Chapter[] } } }>(
     `{ manga(id:${id}) { chapters { nodes { name pageCount chapterNumber isDownloaded scanlator uploadDate } } } }`,

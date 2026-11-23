@@ -1,9 +1,8 @@
 import type { ServerResponse } from "node:http";
-import { gql, primeManga, SOURCE_SEARCH } from "../suwayomi.js";
+import { gql, primeManga } from "../suwayomi.js";
 import { usableSources } from "../paid.js";
 import { compareOffering, heldFor } from "../chapters.js";
-
-const SEARCH = SOURCE_SEARCH;
+import { searchEach } from "../searchall.js";
 
 /**
  * Streams search hits as each source answers.
@@ -27,26 +26,16 @@ export async function streamSearch(res: ServerResponse, query: string, concurren
   const sources = await usableSources();
   send("start", { sources: sources.length });
 
-  const queue = [...sources];
   let finished = 0;
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const src = queue.shift();
-      if (!src) return;
-      try {
-        const r = await gql<{ fetchSourceManga: { mangas: Array<{ id: number; title: string; url: string; thumbnailUrl: string | null }> } }>(
-          SEARCH, { src: src.id, q: query });
-        for (const m of r.fetchSourceManga.mangas.slice(0, 8)) {
-          send("hit", {
-            sourceId: src.id, sourceName: src.displayName, nsfw: src.isNsfw,
-            mangaId: m.id, title: m.title, url: m.url, thumb: `/thumb/${m.id}`,
-          });
-        }
-      } catch { /* one dead source must not spoil the search */ }
-      send("progress", { done: ++finished, total: sources.length, source: src.displayName });
+  await searchEach(sources, query, concurrency, (src, hits) => {
+    for (const m of (hits ?? []).slice(0, 8)) {
+      send("hit", {
+        sourceId: src.id, sourceName: src.displayName, nsfw: src.isNsfw,
+        mangaId: m.id, title: m.title, url: m.url, thumb: `/thumb/${m.id}`,
+      });
     }
-  };
-  await Promise.all(Array.from({ length: concurrency }, worker));
+    send("progress", { done: ++finished, total: sources.length, source: src.displayName });
+  });
   send("done", { sources: sources.length });
   res.end();
 }

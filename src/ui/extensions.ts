@@ -1,6 +1,7 @@
 import { db } from "../db.js";
 import { gql, installedExtensions } from "../suwayomi.js";
 import { esc, page } from "./layout.js";
+import { downBanner } from "./sourcespage.js";
 
 type Ext = { pkgName: string; name: string; lang: string; isNsfw: boolean; isInstalled: boolean; isObsolete: boolean; hasUpdate: boolean; versionName: string };
 
@@ -43,6 +44,7 @@ export async function extensionsPage(opts: { q?: string; lang?: string; nsfw?: b
     `${installedCount} installed of ${list.length} available`,
     `<style>td.act{text-align:right}td.act form{display:inline}
        th:nth-child(5),td:nth-child(5){width:96px}</style>
+     ${await downBanner()}
      <div class="card">
        <form method="get" action="/extensions">
          <input type="search" name="q" placeholder="filter by name" value="${esc(opts.q ?? "")}">
@@ -50,6 +52,7 @@ export async function extensionsPage(opts: { q?: string; lang?: string; nsfw?: b
          <a class="dim" style="margin-left:10px" href="/extensions?installed=1">installed only</a>
          <a class="dim" style="margin-left:10px" href="/extensions?nsfw=0">hide 18+</a>
          <a class="dim" style="margin-left:10px" href="/extensions">all English</a>
+         <a class="dim" style="margin-left:10px" href="/sources">sources in use</a>
        </form>
        <div class="meta" style="margin-top:8px">Installing a source lets you browse and search it.
          Every installed source is queried on every global search, so a smaller set stays faster.</div>

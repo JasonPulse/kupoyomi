@@ -1,6 +1,6 @@
 import { db } from "./db.js";
 import { listEntries, pageEntries, readEntry } from "./unzip.js";
-import { wholesCovered, missingWholes, compareOffering, heldFor } from "./chapters.js";
+import { wholesCovered, missingWholes, compareOffering, heldFor, readingList } from "./chapters.js";
 import { chapterNumbersOf } from "./suwayomi.js";
 
 /**
@@ -13,16 +13,22 @@ import { chapterNumbersOf } from "./suwayomi.js";
  */
 export type PbSeries = {
   id: string; title: string; description: string | null; status: string;
-  cover: string | null; chapters: number; lastUpload: string | null;
+  cover: string | null;
+  /** Chapters a reader is offered, from readingList. Not files. */
+  chapters: number;
+  lastUpload: string | null;
   /** When this library last gained a chapter for the series. */
   lastAdded: string | null;
 };
 
+type SeriesRow = Omit<PbSeries, "chapters"> & { nums: number[] };
+const counted = ({ nums, ...s }: SeriesRow): PbSeries => ({ ...s, chapters: readingList(nums).length });
+
 export const listSeries = async (q?: string): Promise<PbSeries[]> =>
-  (await db().query<PbSeries & { n: string }>(
+  (await db().query<SeriesRow>(
     `SELECT s.id::text AS id, s.title, s.description, s.status,
             CASE WHEN s.cover_path IS NOT NULL THEN '/api/pb/cover/' || s.id ELSE NULL END AS cover,
-            count(c.chapter_number)::int AS chapters,
+            array_agg(c.chapter_number::float8) FILTER (WHERE c.chapter_number IS NOT NULL) AS nums,
             max(c.uploaded_at)::date::text AS "lastUpload",
             max(c.added_at)::text AS "lastAdded"
        FROM series s LEFT JOIN chapter c ON c.series_id = s.id
@@ -35,62 +41,104 @@ export const listSeries = async (q?: string): Promise<PbSeries[]> =>
       -- thirteen series and eight hundred chapters were added underneath them. What the
       -- reader wants is what changed here.
       ORDER BY max(c.added_at) DESC NULLS LAST, s.title`,
-    q ? [`%${q}%`] : [])).rows;
+    q ? [`%${q}%`] : [])).rows.map(counted);
 
-export const getSeries = async (id: number): Promise<PbSeries | null> =>
-  (await db().query<PbSeries>(
+export const getSeries = async (id: number): Promise<PbSeries | null> => {
+  const r = (await db().query<SeriesRow>(
     `SELECT s.id::text AS id, s.title, s.description, s.status,
             CASE WHEN s.cover_path IS NOT NULL THEN '/api/pb/cover/' || s.id ELSE NULL END AS cover,
-            count(c.chapter_number)::int AS chapters,
+            COALESCE(array_agg(c.chapter_number::float8) FILTER (WHERE c.chapter_number IS NOT NULL), '{}') AS nums,
             max(c.uploaded_at)::date::text AS "lastUpload",
             max(c.added_at)::text AS "lastAdded"
        FROM series s LEFT JOIN chapter c ON c.series_id = s.id
-      WHERE s.id = $1 GROUP BY s.id`, [id])).rows[0] ?? null;
+      WHERE s.id = $1 GROUP BY s.id`, [id])).rows[0];
+  return r ? counted(r) : null;
+};
 
 export type PbChapter = {
   id: string; number: number; pages: number | null;
   scanlator: string | null; uploaded: string | null; read: boolean; lastPage: number;
 };
 
-export const getChapters = async (seriesId: number): Promise<PbChapter[]> =>
-  (await db().query<PbChapter>(
-    `SELECT c.chapter_number::text AS id, c.chapter_number::float8 AS number,
-            c.page_count AS pages, c.scanlator, c.uploaded_at::date::text AS uploaded,
-            COALESCE(r.completed, false) AS read, COALESCE(r.last_page, 0) AS "lastPage"
+type Held = { n: number; file_path: string; page_count: number | null; scanlator: string | null;
+  uploaded: string | null; completed: boolean | null; last_page: number | null };
+
+const heldRows = async (seriesId: number): Promise<Held[]> =>
+  (await db().query<Held>(
+    `SELECT c.chapter_number::float8 AS n, c.file_path, c.page_count, c.scanlator,
+            c.uploaded_at::date::text AS uploaded, r.completed, r.last_page
        FROM chapter c
        LEFT JOIN read_progress r
               ON r.series_id = c.series_id AND r.chapter_number = c.chapter_number
-      WHERE c.series_id = $1 ORDER BY c.chapter_number DESC`, [seriesId])).rows;
+      WHERE c.series_id = $1`, [seriesId])).rows;
 
-const chapterFile = async (seriesId: number, chapter: string): Promise<string | null> =>
-  (await db().query<{ file_path: string }>(
-    "SELECT file_path FROM chapter WHERE series_id = $1 AND chapter_number = $2",
-    [seriesId, chapter])).rows[0]?.file_path ?? null;
+/** The id Paperback addresses a chapter by: its number as the ledger stores it. */
+const idOf = (n: number): string => n.toFixed(4);
+
+export async function getChapters(seriesId: number): Promise<PbChapter[]> {
+  const rows = await heldRows(seriesId);
+  const byNum = new Map(rows.map((r) => [r.n, r]));
+  // Progress recorded against a chapter number nothing is filed under: a merged entry
+  // read as one, whose parts have no row of that number.
+  const loose = new Map((await db().query<{ n: number; completed: boolean; last_page: number }>(
+    "SELECT chapter_number::float8 AS n, completed, last_page FROM read_progress WHERE series_id = $1",
+    [seriesId])).rows.map((r) => [r.n, r]));
+  return readingList(rows.map((r) => r.n)).reverse().map((e) => {
+    const files = e.files.map((n) => byNum.get(n)!);
+    const own = loose.get(e.number);
+    return {
+      id: idOf(e.number), number: e.number,
+      pages: files.every((f) => f.page_count !== null) ? files.reduce((t, f) => t + f.page_count!, 0) : null,
+      scanlator: files[0]!.scanlator, uploaded: files[0]!.uploaded,
+      read: (own?.completed ?? false) || files.every((f) => f.completed),
+      lastPage: own?.last_page ?? files[0]!.last_page ?? 0,
+    };
+  });
+}
 
 /**
- * Page list for a chapter, read out of the CBZ itself rather than from the stored page
- * count. The count can be stale or absent on adopted files, and the archive is the only
- * thing that actually knows.
+ * The files behind a chapter id, in reading order. An id that is not an entry but is a
+ * held file still resolves to that file, so a chapter Paperback cached before parts were
+ * folded together keeps opening.
+ */
+async function filesFor(seriesId: number, chapter: string): Promise<Array<{ n: number; path: string }>> {
+  const rows = await heldRows(seriesId);
+  const want = Number(chapter);
+  const entry = readingList(rows.map((r) => r.n)).find((e) => e.number === want);
+  const nums = entry?.files ?? (rows.some((r) => r.n === want) ? [want] : []);
+  return nums.map((n) => ({ n, path: rows.find((r) => r.n === n)!.file_path }));
+}
+
+/** Every page of a chapter across its files, as (file, entry) pairs. */
+async function pagesOf(seriesId: number, chapter: string) {
+  const out: Array<{ path: string; entry: ReturnType<typeof pageEntries>[number] }> = [];
+  for (const f of await filesFor(seriesId, chapter)) {
+    const pages = pageEntries(await listEntries(f.path));
+    // Recorded so the reader and the library agree, and adopted files gain a real count.
+    await db().query(
+      "UPDATE chapter SET page_count = $3 WHERE series_id = $1 AND chapter_number = $2 AND (page_count IS DISTINCT FROM $3)",
+      [seriesId, f.n, pages.length]);
+    for (const entry of pages) out.push({ path: f.path, entry });
+  }
+  return out;
+}
+
+/**
+ * Page list for a chapter, read out of the CBZ files themselves rather than from the
+ * stored page count. The count can be stale or absent on adopted files, and the archive
+ * is the only thing that actually knows.
  */
 export async function getPages(seriesId: number, chapter: string): Promise<string[] | null> {
-  const path = await chapterFile(seriesId, chapter);
-  if (!path) return null;
-  const pages = pageEntries(await listEntries(path));
-  // Recorded so the reader and the library agree, and adopted files gain a real count.
-  await db().query(
-    "UPDATE chapter SET page_count = $3 WHERE series_id = $1 AND chapter_number = $2 AND (page_count IS DISTINCT FROM $3)",
-    [seriesId, chapter, pages.length]);
+  const pages = await pagesOf(seriesId, chapter);
+  if (pages.length === 0) return null;
   return pages.map((_, i) => `/api/pb/page/${seriesId}/${encodeURIComponent(chapter)}/${i}`);
 }
 
 export async function getPage(seriesId: number, chapter: string, index: number): Promise<{ body: Buffer; type: string } | null> {
-  const path = await chapterFile(seriesId, chapter);
-  if (!path) return null;
-  const pages = pageEntries(await listEntries(path));
-  const entry = pages[index];
-  if (!entry) return null;
-  const body = await readEntry(path, entry);
-  const ext = entry.name.toLowerCase().split(".").pop() ?? "";
+  const page = (await pagesOf(seriesId, chapter))[index];
+  if (!page) return null;
+  const body = await readEntry(page.path, page.entry);
+  const ext = page.entry.name.toLowerCase().split(".").pop() ?? "";
   const type = ext === "png" ? "image/png" : ext === "webp" ? "image/webp"
     : ext === "gif" ? "image/gif" : ext === "avif" ? "image/avif" : "image/jpeg";
   return { body, type };

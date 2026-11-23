@@ -67,6 +67,43 @@ export const isPartSql = (alias = ""): string => {
 export const baseOfSql = (alias = ""): string =>
   `trunc(${alias ? `${alias}.chapter_number` : "chapter_number"})`;
 
+/** One chapter as a reader sees it, and the held files that make it up, in reading order. */
+export type ReadingEntry = { number: number; files: number[] };
+
+/**
+ * The chapters a reader should be offered, from the numbers held.
+ *
+ * Listing every file told Paperback that The Angel Next Door had 142 chapters when it
+ * runs to 31. A whole chapter held beside a split release of itself is the same story
+ * twice in different scans: Angel's chapter 1 is 57 pages whole and 64 pages across 1.1
+ * to 1.5, The Golden Experience Point's 10 is 41 pages against 37 across 10.1 and 10.2.
+ * Different scans of one chapter share no page hashes, which is why comparing pages said
+ * they were different chapters.
+ *
+ * So a split is a set of parts starting at .1. Beside a whole chapter it is a duplicate
+ * and only the whole is offered. Without one, the parts are read back to back as that
+ * chapter. A part with no .1 next to it, such as a 39.5 extra, keeps its own entry. Files
+ * stay on disk either way; this is only what is listed.
+ */
+export function readingList(nums: Iterable<number>): ReadingEntry[] {
+  const groups = new Map<number, number[]>();
+  for (const n of new Set(nums)) {
+    const w = Math.trunc(n);
+    const g = groups.get(w);
+    if (g) g.push(n); else groups.set(w, [n]);
+  }
+  const out: ReadingEntry[] = [];
+  for (const [w, members] of groups) {
+    const parts = members.filter(isPart).sort((a, b) => a - b);
+    const split = parts.some((p) => Math.round((p - w) * 10) === 1);
+    const hasWhole = members.includes(w);
+    if (hasWhole) out.push({ number: w, files: [w] });
+    else if (split) out.push({ number: w, files: parts });
+    if (!split) for (const p of parts) out.push({ number: p, files: [p] });
+  }
+  return out.sort((a, b) => a.number - b.number);
+}
+
 export const IS_PART_SQL = isPartSql();
 export const BASE_OF_SQL = baseOfSql();
 

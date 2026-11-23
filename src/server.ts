@@ -75,6 +75,8 @@ import { previewPage } from "./ui/preview.js";
 import { confirmRemovalPage } from "./ui/remove.js";
 import { removeSeries } from "./remove.js";
 import { extensionsPage, setExtension } from "./ui/extensions.js";
+import { sourcesPage, moveOffPage } from "./ui/sourcespage.js";
+import { startMoveOff, applyMoveOff } from "./moveoff.js";
 import { ASSETS } from "./ui/assets.js";
 import { serveBundle } from "./ui/pbrepo.js";
 import { startRefresh, refreshState } from "./metadata.js";
@@ -355,6 +357,9 @@ export async function serve(): Promise<void> {
         return html(previewPage(url.searchParams.get("source") ?? "",
           url.searchParams.get("url") ?? "", url.searchParams.get("title") ?? ""));
       }
+      if (path === "/sources") return html(sourcesPage());
+      const src = /^\/sources\/([^/]+)$/.exec(path);
+      if (src) return html(moveOffPage(decodeURIComponent(src[1]!), url.searchParams.get("said") ?? undefined));
       if (path === "/extensions") {
         return html(extensionsPage({
           ...(url.searchParams.get("q") ? { q: url.searchParams.get("q")! } : {}),
@@ -437,6 +442,23 @@ export async function serve(): Promise<void> {
             files: form.get("files") === "1", legacy: form.get("legacy") === "1",
           });
           return "/";
+        }
+        const find = /^\/sources\/([^/]+)\/find$/.exec(path);
+        if (find) {
+          const sid = decodeURIComponent(find[1]!);
+          await startMoveOff(sid);
+          return `/sources/${encodeURIComponent(sid)}`;
+        }
+        const move = /^\/sources\/([^/]+)\/move$/.exec(path);
+        if (move) {
+          const sid = decodeURIComponent(move[1]!);
+          const picks = new Map<number, number>();
+          for (const [k, v] of form) {
+            const m = /^pick_(\d+)$/.exec(k);
+            if (m) picks.set(Number(m[1]), Number(v));
+          }
+          const moved = await applyMoveOff(sid, picks);
+          return `/sources/${encodeURIComponent(sid)}?said=${encodeURIComponent(`switched ${moved} series`)}`;
         }
         const promote = /^\/series\/(\d+)\/switch$/.exec(path);
         if (promote) {

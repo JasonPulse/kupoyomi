@@ -14,6 +14,7 @@ export type SchedulerState = {
   lastFetch?: { at: string; downloaded: number; failed: number; error?: string };
   lastStallCheck?: { at: string; flagged: number };
   lastMetadata?: { at: string; error?: string };
+  lastSourceCheck?: { at: string; checked: number; down: number; error?: string };
   outstanding?: number;
 };
 export const state: SchedulerState = {};
@@ -122,6 +123,67 @@ export async function checkStalled(): Promise<number> {
   return flagged;
 }
 
+/** Consecutive failed probes before a host counts as down. One bad minute is not news. */
+const DOWN_AFTER = 2;
+
+/**
+ * Probes every source a series depends on and alerts when a host stops answering.
+ *
+ * Same transition rule as the stall alert: once when a host goes, once when it comes
+ * back. A host that stays down is not news on every pass.
+ */
+export async function checkSources(): Promise<{ checked: number; down: number }> {
+  const p = db();
+  const { sourceUnreachable } = await import("./suwayomi.js");
+  const sources = (await p.query<{ source_id: string; source_name: string; titles: string[] }>(
+    `SELECT b.source_id, min(b.source_name) AS source_name,
+            array_agg(s.title ORDER BY s.title) AS titles
+       FROM series_binding b JOIN series s ON s.id = b.series_id
+      WHERE b.role = 'active'
+      GROUP BY b.source_id`)).rows;
+
+  let down = 0;
+  // Five at a time: a dead host costs a full timeout, and twenty-five of those in a row
+  // would hold the check for most of twenty minutes.
+  for (let i = 0; i < sources.length; i += 5) {
+    await Promise.all(sources.slice(i, i + 5).map(async (s) => {
+      const why = await sourceUnreachable(s.source_id);
+      const series = `${s.titles.length} series use it: ${s.titles.slice(0, 8).join(", ")}${
+        s.titles.length > 8 ? ", ..." : ""}.`;
+      if (why === null) {
+        const alerted = (await p.query<{ a: boolean }>(
+          "SELECT alerted_at IS NOT NULL AS a FROM source_status WHERE source_id = $1",
+          [s.source_id])).rows[0]?.a ?? false;
+        await p.query(
+          `INSERT INTO source_status (source_id, source_name, checked_at) VALUES ($1,$2,now())
+           ON CONFLICT (source_id) DO UPDATE SET source_name = EXCLUDED.source_name, failures = 0,
+             down_since = NULL, alerted_at = NULL, last_error = NULL, checked_at = now()`,
+          [s.source_id, s.source_name]);
+        if (alerted) await notify(`Kupoyomi: ${s.source_name} is back`, `${s.source_name} is answering again. ${series}`);
+        return;
+      }
+      down++;
+      const r = (await p.query<{ failures: number; alerted_at: string | null; down_since: string }>(
+        `INSERT INTO source_status (source_id, source_name, failures, down_since, last_error, checked_at)
+         VALUES ($1,$2,1,now(),$3,now())
+         ON CONFLICT (source_id) DO UPDATE SET
+           source_name = EXCLUDED.source_name, failures = source_status.failures + 1,
+           down_since = COALESCE(source_status.down_since, now()),
+           last_error = EXCLUDED.last_error, checked_at = now()
+         RETURNING failures, alerted_at::text, down_since::text`,
+        [s.source_id, s.source_name, why.slice(0, 300)])).rows[0]!;
+      console.log(`  source ${s.source_name} unreachable (${r.failures} in a row): ${why.slice(0, 100)}`);
+      if (r.failures >= DOWN_AFTER && !r.alerted_at) {
+        await notify(`Kupoyomi: ${s.source_name} is unreachable`,
+          `${s.source_name} has not answered since ${r.down_since.slice(0, 16)} (${why.slice(0, 120)}). ` +
+          `${series} Move them under Sources in Kupoyomi.`);
+        await p.query("UPDATE source_status SET alerted_at = now() WHERE source_id = $1", [s.source_id]);
+      }
+    }));
+  }
+  return { checked: sources.length, down };
+}
+
 /**
  * Keeps the library current on its own.
  *
@@ -206,6 +268,22 @@ export function startScheduler(): void {
         state.lastStallCheck = { at: new Date().toISOString(), flagged };
       } catch { /* reported on the next pass */ }
       await sleep(hours(num("STALL_INTERVAL_HOURS", 24)));
+    }
+  })();
+
+  // Hourly rather than with the six-hourly scan: a dead host is the one thing here that
+  // someone should hear about the same day.
+  void (async () => {
+    await sleep(90_000);                 // after the extension bootstrap has had its go
+    for (;;) {
+      try {
+        const r = await checkSources();
+        state.lastSourceCheck = { at: new Date().toISOString(), ...r };
+      } catch (err) {
+        state.lastSourceCheck = { at: new Date().toISOString(), checked: 0, down: 0,
+          error: err instanceof Error ? err.message : String(err) };
+      }
+      await sleep(hours(1));
     }
   })();
 

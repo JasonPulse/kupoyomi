@@ -7,6 +7,7 @@ import { resolveManga } from "./match.js";
 import { buildCbz, comicInfo } from "./cbz.js";
 import { libraryPathFor } from "./remap.js";
 import { heldFor } from "./chapters.js";
+import { isImage } from "./imgsize.js";
 
 /** Suwayomi's page proxy lives beside the graphql endpoint. */
 
@@ -429,6 +430,13 @@ export async function fetchWanted(
             throw new Error(`page ${i}: suwayomi ${res.status}${said ? ` said ${said}` : " with an empty body"}`);
           }
           const buf = Buffer.from(await res.arrayBuffer());
+          // A 200 is not a page. Bbato's image host went and Suwayomi kept answering 200
+          // with zero bytes, which this wrote into the archive as a page: the chapter
+          // would have been recorded as held, and no later source would ever be asked
+          // for it again.
+          if (!isImage(buf)) {
+            throw new Error(`page ${i}: suwayomi sent ${buf.length} bytes that are not an image`);
+          }
           const ext = (res.headers.get("content-type") ?? "").includes("png") ? "png"
             : (res.headers.get("content-type") ?? "").includes("webp") ? "webp" : "jpg";
           images.push({ name: `${String(i + 1).padStart(3, "0")}.${ext}`, data: buf });

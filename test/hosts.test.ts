@@ -204,14 +204,16 @@ test("moving off a dead source offers exact titles only, and switches only what 
   for (let i = 0; i < 100 && !moveOffJob(DEAD)?.finishedAt; i++) await new Promise((r) => setTimeout(r, 50));
   const job = moveOffJob(DEAD)!;
   assert.ok(job.finishedAt, "the search finished");
-  const l = job.series.find((s) => s.seriesId === seriesId)!;
+  const l = job.series.find((s) => s.seriesId === Number(seriesId))!;
   // LIVE lists the title in capitals and counts as exact. NEAR lists "(Novel)", a
   // different work. DEAD is the source being left and is never offered back.
   assert.deepEqual(l.candidates.map((c) => c.sourceId), [LIVE]);
 
   // Staying put is a pick too.
-  assert.equal(await applyMoveOff(DEAD, new Map([[seriesId, -1]])), 0);
-  assert.equal(await applyMoveOff(DEAD, new Map([[seriesId, 0]])), 1);
+  // Keyed by number, as the route parses them from the form. pg hands the bigserial id
+  // back as a string, and a test keyed by that string passed while the page moved nothing.
+  assert.equal(await applyMoveOff(DEAD, new Map([[Number(seriesId), -1]])), 0);
+  assert.equal(await applyMoveOff(DEAD, new Map([[Number(seriesId), 0]])), 1);
   const roles = (await db().query<{ source_id: string; role: string }>(
     "SELECT source_id, role FROM series_binding WHERE series_id = $1 ORDER BY source_id", [seriesId])).rows;
   assert.deepEqual(roles, [{ source_id: DEAD, role: "former" }, { source_id: LIVE, role: "active" }]);

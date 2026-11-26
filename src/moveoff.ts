@@ -41,14 +41,20 @@ export type MoveJob = {
 const jobs = new Map<string, MoveJob>();
 export const moveOffJob = (sourceId: string): MoveJob | undefined => jobs.get(sourceId);
 
-/** Series whose one source is this one. */
+/**
+ * Series whose one source is this one.
+ *
+ * The id is a bigserial, which pg returns as a string. Left as one, the picks posted
+ * from the move page (numbers, parsed from the form) never matched a series, and every
+ * submit switched nothing.
+ */
 export const seriesOn = async (sourceId: string): Promise<Array<{ id: number; title: string; held: number }>> =>
-  (await db().query<{ id: number; title: string; nums: number[] }>(
+  (await db().query<{ id: string; title: string; nums: number[] }>(
     `SELECT s.id, s.title,
             ARRAY(SELECT c.chapter_number::float8 FROM chapter c WHERE c.series_id = s.id) AS nums
        FROM series_binding b JOIN series s ON s.id = b.series_id
       WHERE b.role = 'active' AND b.source_id = $1 ORDER BY s.title`, [sourceId])).rows
-    .map((r) => ({ id: r.id, title: r.title, held: readingList(r.nums).length }));
+    .map((r) => ({ id: Number(r.id), title: r.title, held: readingList(r.nums).length }));
 
 /**
  * Every other usable source that lists this exact title, with what each would give.
